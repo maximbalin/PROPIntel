@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PropIntel — AI Property Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <div class="wordmark">
+        <span class="wordmark-prop">PROP</span><span class="wordmark-intel">INTEL</span>
+      </div>
+      <div class="tagline">AI Property Intelligence</div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="search-section">
+      <div class="search-card">
+        <label class="search-label">Enter a US Property Address</label>
+        <div class="search-row">
+          <input type="text" id="addressInput" class="address-input"
+            placeholder="e.g. 1600 Pennsylvania Ave NW, Washington DC"
+            autocomplete="off" />
+        </div>
+        <div class="mode-row">
+          <span class="mode-label">Analysis Mode:</span>
+          <div class="mode-pills">
+            <button class="mode-pill active" data-mode="buyer" id="pilBuyer">Buyer</button>
+            <button class="mode-pill" data-mode="investor" id="pilInvestor">Investor</button>
+          </div>
+        </div>
+        <button class="analyze-btn" id="analyzeBtn">Analyze Property</button>
+      </div>
+    </section>
+
+    <div id="loadingPanel" class="loading-panel hidden">
+      <div class="loading-steps">
+        <div class="loading-step active" id="step1">
+          <span class="step-dot"></span>
+          <span>Geocoding address</span>
+        </div>
+        <div class="loading-step" id="step2">
+          <span class="step-dot"></span>
+          <span>Fetching public data</span>
+        </div>
+        <div class="loading-step" id="step3">
+          <span class="step-dot"></span>
+          <span>Running AI analysis</span>
+        </div>
+        <div class="loading-step" id="step4">
+          <span class="step-dot"></span>
+          <span>Synthesizing report</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="errorBanner" class="error-banner hidden">
+      <span id="errorMsg"></span>
+    </div>
+
+    <section id="resultsPanel" class="results-panel hidden">
+      <div class="results-header">
+        <div class="results-address">
+          <span class="mono" id="resultAddress"></span>
+          <span class="coords mono" id="resultCoords"></span>
+        </div>
+        <div class="mode-badge" id="resultMode"></div>
+      </div>
+
+      <div class="scores-grid" id="scoresGrid"></div>
+
+      <div class="narrative-card">
+        <div class="card-title">AI Risk Narrative</div>
+        <div class="narrative-text" id="narrativeText"></div>
+      </div>
+
+      <div class="advice-card" id="adviceCard">
+        <div class="card-title" id="adviceTitle">Mode Advice</div>
+        <div class="advice-text" id="adviceText"></div>
+      </div>
+
+      <div class="risks-section">
+        <div class="card-title">Risk Factors</div>
+        <div id="risksList"></div>
+      </div>
+
+      <div class="sources-footer">
+        <span class="mono">Powered by free public data sources: </span>
+        <span id="sourcesList" class="mono teal"></span>
+      </div>
+
+      <div class="confidence-footer">
+        <span class="mono">Overall Confidence: </span>
+        <span id="confidenceValue" class="mono amber"></span>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
