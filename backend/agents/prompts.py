@@ -125,11 +125,29 @@ Property location: {address} (lat: {lat}, lon: {lon})
 
 Raw data provided:
 - Census ACS Demographics: {census_data}
+  Key fields:
+  - median_household_income (dollars; -1 = unavailable)
+  - vacancy_rate_pct, unemployment_rate_pct, poverty_rate_pct, owner_occupancy_pct (derived %)
+  - bachelors_rate_pct (% of adults 25+ with bachelor's degree)
+  - gini_index (0=equal, 1=max inequality; US avg 0.489)
+  - housing_age_years (median age of housing stock)
+  - stability_score (0-100 pre-computed; use as starting point, adjust based on your analysis)
+  - benchmarks (pre-formatted comparison strings to national averages — quote these directly)
+  - national_benchmarks (raw national values for reference)
+
+Severity guidelines:
+- vacancy_rate_pct > 20%          → high;  15–20% → medium;  9–15% → low
+- unemployment_rate_pct > 10%     → high;  6–10%  → medium;  4–6%  → low
+- poverty_rate_pct > 25%          → high;  15–25% → medium;  11–15% → low
+- median_income < $40k            → high;  $40–60k → medium; >$60k → low
+- owner_occupancy_pct < 30%       → high (absentee landlord risk)
+- housing_age_years > 80          → medium (deferred maintenance risk)
+- gini_index > 0.55               → medium (high inequality = instability signal)
 
 Your task:
-1. Analyze neighborhood stability signals from demographic data
-2. Median income trajectory, vacancy rates, and unemployment indicate stability
-3. Compare to US national benchmarks: median HH income ~$75k, vacancy ~9%, unemployment ~4%
+1. Identify risks only where data clearly deviates from national benchmarks
+2. Quote the benchmarks strings in your evidence — they are pre-formatted for citation
+3. Do NOT flag a metric as a risk if it is near or better than national average
 4. Do NOT make assumptions beyond what the data shows
 5. If you have insufficient data to make a claim, say 'insufficient data' — never invent risks.
 
@@ -138,10 +156,10 @@ Respond ONLY with valid JSON:
   "risks": [
     {{
       "category": "high_vacancy",
-      "severity": "medium",
-      "description": "Vacancy rate of 18% is 2x the national average",
-      "evidence": ["Census ACS B25002_003E shows 18% vacancy in tract"],
-      "confidence": 85,
+      "severity": "high",
+      "description": "Vacancy rate of 22% is more than double the national average, signaling population outflow",
+      "evidence": ["Vacancy rate 22.0% — 2.4× national avg (9.2%)", "Census ACS 2022, tract 004201"],
+      "confidence": 88,
       "timeline": "1-3 years"
     }}
   ],
@@ -156,6 +174,7 @@ Respond ONLY with valid JSON:
 
 Rules:
 - Only output JSON, no preamble or explanation outside the JSON
+- Use stability_score as your anchor for sub_scores — don't deviate by more than ±15 without strong evidence
 - If any risk has confidence < 40, note "low confidence — verify independently"
 """
 
