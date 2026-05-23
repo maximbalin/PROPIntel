@@ -402,6 +402,131 @@ def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
     return ev
 
 
+def _build_deterministic_risk_items(raw_data: dict) -> list[RiskItem]:
+    """
+    Generate guaranteed RiskItem entries for major roads, FEMA, and EPA hazards
+    directly from raw_data — no LLM required. These fill gaps when agents fail or
+    when the LLM overlooks an obvious risk (e.g. Route 9 near Natick).
+    """
+    items: list[RiskItem] = []
+    osm     = raw_data.get("osm",     {}) or {}
+    fema    = raw_data.get("fema",    {}) or {}
+    epa     = raw_data.get("epa",     {}) or {}
+    traffic = raw_data.get("traffic", {}) or {}
+    major_roads = osm.get("major_roads", {}) or {}
+    aadt_data   = traffic.get("aadt_estimates", {}) or {}
+    crash       = traffic.get("crash_summary",  {}) or {}
+    timelines   = traffic.get("timeline_patterns", []) or []
+
+    # ── Major road risks ──────────────────────────────────────
+    road_meta = {
+        "motorway": ("Interstate / Motorway",
+                     lambda d: "critical" if d < 200 else "high" if d < 800 else "medium"),
+        "trunk":    ("US Highway",
+                     lambda d: "high" if d < 400 else "medium" if d < 1200 else "low"),
+        "primary":  ("Primary Road (US/State Route)",
+                     lambda d: "high" if d < 300 else "medium" if d < 800 else "low"),
+        "secondary":("Secondary Road",
+                     lambda d: "medium" if d < 200 else "low"),
+    }
+    for cls, (label, sev_fn) in road_meta.items():
+        rd = major_roads.get(cls, {})
+        if rd.get("count", 0) == 0:
+            continue
+        nm = rd.get("nearest_m")
+        if nm is None:
+            continue
+        dist_m = float(nm)
+        names  = rd.get("names", [])
+        name_str = ", ".join(names[:2]) if names else cls
+        sev = sev_fn(dist_m)
+
+        evidence = [
+            f"{label} '{name_str}' at {int(dist_m)}m (source: OpenStreetMap)"
+        ]
+        t = aadt_data.get(cls, {})
+        if t.get("estimated_aadt"):
+            aadt_val  = t["estimated_aadt"]
+            peak      = t.get("peak_hour_vehicles", round(aadt_val * 0.10))
+            noise_db  = t.get("noise_db_at_property")
+            evidence.append(
+                f"Est. {aadt_val:,} vehicles/day; peak-hour ~{peak:,} vehicles "
+                f"(source: road class AADT estimate)")
+            if noise_db:
+                evidence.append(
+                    f"Estimated noise at property: ~{noise_db} dB "
+                    f"(source: distance-attenuated calculation)")
+        if "error" not in crash and crash.get("total_crashes") is not None:
+            total  = crash["total_crashes"]
+            fatals = crash.get("fatal_crashes", 0)
+            if total > 0:
+                fatal_txt = f", {fatals} fatal" if fatals else ""
+                evidence.append(
+                    f"{total} recorded crashes within 0.5mi, 2019–2023{fatal_txt} "
+                    f"(source: NHTSA FARS)")
+        if timelines:
+            evidence.append(timelines[0])
+
+        items.append(RiskItem(
+            category=f"traffic_{cls}_road",
+            severity=sev,
+            description=(
+                f"{label} '{name_str}' is {int(dist_m)}m from property — "
+                f"ongoing traffic noise, air-quality impact, and pedestrian safety risk"
+            ),
+            evidence=evidence,
+            confidence=88,
+            timeline="ongoing",
+        ))
+
+    # ── FEMA flood risk ───────────────────────────────────────
+    if fema.get("sfha"):
+        zone = fema.get("flood_zone", "")
+        bfe  = fema.get("bfe_feet")
+        bfe_txt = f"; BFE {bfe} ft NAVD88" if bfe else ""
+        items.append(RiskItem(
+            category="flood_risk_sfha",
+            severity="high",
+            description=(
+                f"Property is in FEMA Special Flood Hazard Area (Zone {zone})"
+                f"{bfe_txt} — mandatory flood insurance required"
+            ),
+            evidence=[
+                f"FEMA NFHL Zone {zone}: 1%-annual-chance flood (source: OpenFEMA NFHL)",
+                "SFHA designation = mandatory flood insurance on federally-backed mortgages",
+            ],
+            confidence=92,
+            timeline="ongoing",
+        ))
+
+    # ── EPA Tier-1 risk ───────────────────────────────────────
+    t1_facilities = [
+        f for f in (epa.get("top_facilities") or [])
+        if f.get("tier") == 1
+    ]
+    for fac in t1_facilities[:2]:
+        dist_mi = fac.get("distance_miles", 0) or 0
+        sev = "critical" if dist_mi < 0.5 else "high"
+        items.append(RiskItem(
+            category="epa_tier1_hazard",
+            severity=sev,
+            description=(
+                f"Tier-1 EPA hazardous site '{fac.get('name', 'facility')}' "
+                f"at {dist_mi:.1f} mi — Superfund/toxic release risk"
+            ),
+            evidence=[
+                f"EPA ECHO: '{fac.get('name')}' at {dist_mi:.1f} mi "
+                f"(Superfund={fac.get('superfund')}, "
+                f"violations={fac.get('violation_count', 0)}) "
+                f"(source: EPA ECHO)",
+            ],
+            confidence=90,
+            timeline="ongoing",
+        ))
+
+    return items
+
+
 def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
     """Deterministic hidden costs from raw data, supplemented by LLM."""
     costs: list[HiddenCost] = []
@@ -504,7 +629,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v6:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v7:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
@@ -599,6 +724,25 @@ async def analyze(req: AnalyzeRequest):
                 confidence=int(r.get("confidence", 50)),
                 timeline=r.get("timeline"),
             ))
+
+    # Merge deterministic risks — add any road/hazard class not already covered by LLM
+    det_risks = _build_deterministic_risk_items(raw_data)
+    llm_categories = {r.category for r in risks}
+    _traffic_keywords = {"traffic", "highway", "road", "noise", "motorway", "trunk", "primary"}
+    _flood_keywords   = {"flood"}
+    _epa_keywords     = {"epa", "tier", "hazard", "superfund", "pollution"}
+
+    def _covered(det_cat: str, llm_cats: set[str]) -> bool:
+        words = set(det_cat.lower().split("_"))
+        for llm_cat in llm_cats:
+            llm_words = set(llm_cat.lower().split("_"))
+            if words & llm_words & (_traffic_keywords | _flood_keywords | _epa_keywords):
+                return True
+        return False
+
+    for dr in det_risks:
+        if not _covered(dr.category, llm_categories):
+            risks.append(dr)
 
     data_sources = list({
         src
