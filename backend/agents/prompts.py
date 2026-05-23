@@ -4,16 +4,26 @@ Property location: {address} (lat: {lat}, lon: {lon})
 
 Raw data provided:
 - FEMA Flood Data: {fema_data}
+  Key fields: flood_zone (A/AE/VE/X/null), flood_zone_confirmed (true=mapped area, false=no data),
+  sfha (true=mandatory flood insurance), risk_level (critical/high/moderate/low/unknown),
+  bfe_feet (base flood elevation in feet — how high water rises, null if not available),
+  bfe_available (true/false), firm_panel (FIRM map panel ID),
+  firm_effective_date (YYYY-MM-DD), firm_panel_age_years (older panels are less reliable)
 - EPA Facilities Nearby: {epa_data}
 - Elevation: {elevation_data}
 
 Your task:
 1. Analyze the environmental risks for this property
-2. Identify specific risks with evidence from the data provided
-3. Do NOT invent risks not supported by the data. If data is missing, say so.
-4. Rate each risk: low / medium / high / critical
-5. Assign a confidence score (0-100) based on data quality
-6. If you have insufficient data to make a claim, say 'insufficient data' — never invent risks.
+2. For flood risk — use flood_zone + sfha + bfe_feet together:
+   - If flood_zone_confirmed=false: note "outside mapped flood area — data unavailable"
+   - If sfha=true: mandatory flood insurance is required — always flag this
+   - If bfe_available=true: cite the BFE in feet in your evidence
+   - If firm_panel_age_years > 15: flag the FIRM panel as potentially outdated
+3. Identify specific risks with evidence from the data provided
+4. Do NOT invent risks not supported by the data. If data is missing, say so.
+5. Rate each risk: low / medium / high / critical
+6. Assign a confidence score (0-100) based on data quality
+7. If you have insufficient data to make a claim, say 'insufficient data' — never invent risks.
 
 Respond ONLY with valid JSON in this exact structure:
 {{
@@ -21,8 +31,8 @@ Respond ONLY with valid JSON in this exact structure:
     {{
       "category": "flood_risk",
       "severity": "high",
-      "description": "Property is in FEMA Flood Zone AE (high-risk)",
-      "evidence": ["FEMA NFHL shows Zone AE designation", "Within 100-year floodplain"],
+      "description": "Property is in FEMA Flood Zone AE with BFE of 14 ft — mandatory flood insurance required",
+      "evidence": ["FEMA NFHL confirms Zone AE (high-risk, 1% annual chance)", "Base Flood Elevation: 14 ft NAVD88", "SFHA designation triggers mandatory insurance"],
       "confidence": 88,
       "timeline": "ongoing"
     }}
