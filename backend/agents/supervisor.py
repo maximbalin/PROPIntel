@@ -1,6 +1,6 @@
 import json
 import logging
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage
 from backend.agents.prompts import SYNTHESIZER_PROMPT
 from backend.config import get_settings
@@ -11,9 +11,9 @@ logger = logging.getLogger(__name__)
 
 def get_llm():
     settings = get_settings()
-    return ChatAnthropic(
+    return ChatOpenAI(
         model=settings.llm_model,
-        anthropic_api_key=settings.anthropic_api_key,
+        openai_api_key=settings.openai_api_key,
         max_tokens=4096,
     )
 

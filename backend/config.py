@@ -3,11 +3,11 @@ from functools import lru_cache
 
 
 class Settings(BaseSettings):
-    anthropic_api_key: str = ""
+    openai_api_key: str = ""
     census_api_key: str = ""
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/propintel"
     redis_url: str = "redis://localhost:6379"
-    llm_model: str = "claude-sonnet-4-20250514"
+    llm_model: str = "gpt-4o"
     log_level: str = "INFO"
 
     class Config:

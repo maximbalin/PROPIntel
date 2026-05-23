@@ -1,7 +1,7 @@
 fastapi
 uvicorn[standard]
 langgraph
-langchain-anthropic
+langchain-openai
 langchain-core
 asyncpg
 redis
