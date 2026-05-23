@@ -49,11 +49,14 @@ async def synthesizer_node(state: dict) -> dict:
         for report in [env_report, infra_report, neighborhood_report]:
             all_risks.extend(report.get("risks", []))
         return {
-            "scores": scores,
-            "risks": all_risks,
-            "narrative": result.get("narrative", ""),
-            "mode_advice": result.get("mode_advice", ""),
+            "scores":           scores,
+            "risks":            all_risks,
+            "narrative":        result.get("narrative", ""),
+            "mode_advice":      result.get("mode_advice", ""),
             "overall_confidence": int(result.get("overall_confidence", 50)),
+            "score_evidence":   result.get("score_evidence"),
+            "recommendation":   result.get("recommendation"),
+            "price_impact":     result.get("price_impact"),
         }
     except Exception as e:
         logger.error(f"Synthesizer failed: {e}")
@@ -61,11 +64,14 @@ async def synthesizer_node(state: dict) -> dict:
         for report in [env_report, infra_report, neighborhood_report]:
             all_risks.extend(report.get("risks", []))
         return {
-            "scores": fallback_scores,
-            "risks": all_risks,
-            "narrative": "Analysis could not be synthesized due to an error.",
-            "mode_advice": "Please review individual risk factors manually.",
+            "scores":           fallback_scores,
+            "risks":            all_risks,
+            "narrative":        "Analysis could not be synthesized due to an error.",
+            "mode_advice":      "Please review individual risk factors manually.",
             "overall_confidence": 30,
+            "score_evidence":   None,
+            "recommendation":   None,
+            "price_impact":     None,
         }
 
 

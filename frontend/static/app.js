@@ -1,4 +1,5 @@
 let currentMode = 'buyer';
+let radarChartInstance = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.mode-pill').forEach(pill => {
@@ -8,7 +9,6 @@ document.addEventListener('DOMContentLoaded', () => {
       currentMode = pill.dataset.mode;
     });
   });
-
   document.getElementById('analyzeBtn').addEventListener('click', runAnalysis);
   document.getElementById('addressInput').addEventListener('keydown', e => {
     if (e.key === 'Enter') runAnalysis();
@@ -17,15 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function runAnalysis() {
   const address = document.getElementById('addressInput').value.trim();
-  if (!address) {
-    showError('Please enter a property address.');
-    return;
-  }
+  if (!address) { showError('Please enter a property address.'); return; }
 
-  hideError();
-  hideResults();
-  showLoading();
-  disableBtn(true);
+  hideError(); hideResults(); showLoading(); disableBtn(true);
 
   let stepIdx = 0;
   const stepInterval = setInterval(() => {
@@ -37,9 +31,7 @@ async function runAnalysis() {
     if (stepIdx <= 4) {
       const cur = document.getElementById(`step${stepIdx}`);
       if (cur) cur.classList.add('active');
-    } else {
-      clearInterval(stepInterval);
-    }
+    } else { clearInterval(stepInterval); }
   }, 1800);
 
   try {
@@ -48,18 +40,15 @@ async function runAnalysis() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ address, mode: currentMode, risk_tolerance: 'medium' }),
     });
-
     clearInterval(stepInterval);
-    [1, 2, 3, 4].forEach(i => {
+    [1,2,3,4].forEach(i => {
       const el = document.getElementById(`step${i}`);
       if (el) { el.classList.remove('active'); el.classList.add('done'); }
     });
-
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Unknown error' }));
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
-
     const data = await resp.json();
     hideLoading();
     renderResults(data);
@@ -80,7 +69,11 @@ function renderResults(data) {
   document.getElementById('resultMode').textContent = data.mode.toUpperCase();
   document.getElementById('confidenceValue').textContent = `${data.overall_confidence}%`;
 
-  renderScores(data.scores, data.mode);
+  renderDecision(data.recommendation);
+  renderRadar(data.scores);
+  renderScores(data.scores, data.score_evidence);
+  renderNearbyRisks(data.nearby_risks || []);
+  renderPriceContext(data.price_context);
 
   const bsec = document.getElementById('breakdownSection');
   if (data.score_breakdown) {
@@ -91,13 +84,11 @@ function renderResults(data) {
   }
 
   document.getElementById('narrativeText').textContent = data.narrative;
-
   const adviceCard = document.getElementById('adviceCard');
   adviceCard.className = `advice-card${data.mode === 'investor' ? ' investor-mode' : ''}`;
   document.getElementById('adviceTitle').textContent =
     data.mode === 'investor' ? 'Investor Advice' : 'Buyer Advice';
-  document.getElementById('adviceIcon').textContent =
-    data.mode === 'investor' ? '📈' : '💡';
+  document.getElementById('adviceIcon').textContent = data.mode === 'investor' ? '📈' : '💡';
   document.getElementById('adviceText').textContent = data.mode_advice;
 
   renderRisks(data.risks);
@@ -106,60 +97,255 @@ function renderResults(data) {
   showResults();
 }
 
-function renderScores(scores, mode) {
+// ── Decision banner ───────────────────────────────────────
+
+function renderDecision(rec) {
+  const banner = document.getElementById('decisionBanner');
+  if (!rec) { banner.classList.add('hidden'); return; }
+
+  banner.className = `decision-banner verdict-${rec.verdict}`;
+  document.getElementById('decisionVerdict').textContent = rec.verdict;
+  document.getElementById('decisionScore').textContent = rec.score;
+  document.getElementById('decisionSummary').textContent = rec.summary;
+
+  const factors = document.getElementById('decisionFactors');
+  factors.innerHTML = (rec.key_factors || [])
+    .map(f => `<li>${f}</li>`).join('');
+}
+
+// ── Radar chart ───────────────────────────────────────────
+
+function renderRadar(scores) {
+  if (radarChartInstance) { radarChartInstance.destroy(); radarChartInstance = null; }
+  const ctx = document.getElementById('radarChart').getContext('2d');
+
+  // All axes: higher = better for display (invert risk scores)
+  const data = [
+    scores.livability,
+    100 - scores.environmental_exposure,
+    100 - scores.infrastructure_risk,
+    scores.neighborhood_stability,
+    100 - scores.hidden_risk,
+  ];
+
+  radarChartInstance = new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: ['Livability', 'Env. Safety', 'Infra. Safety', 'Nbhd. Stability', 'Low Hidden Risk'],
+      datasets: [{
+        data,
+        backgroundColor: 'rgba(245,158,11,0.12)',
+        borderColor: 'rgba(217,119,6,0.8)',
+        borderWidth: 2,
+        pointBackgroundColor: 'rgba(217,119,6,0.9)',
+        pointRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      scales: {
+        r: {
+          min: 0, max: 100, ticks: { display: false, stepSize: 25 },
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          pointLabels: { font: { size: 10, family: 'Inter' }, color: '#6b7280' },
+          angleLines: { color: 'rgba(0,0,0,0.06)' },
+        },
+      },
+      plugins: { legend: { display: false } },
+    },
+  });
+}
+
+// ── Score cards with evidence ─────────────────────────────
+
+function renderScores(scores, evidence) {
   const grid = document.getElementById('scoresGrid');
   grid.innerHTML = '';
 
   const defs = [
-    { key: 'livability',              label: 'Livability',       invert: false },
-    { key: 'environmental_exposure',  label: 'Env. Exposure',    invert: true  },
-    { key: 'infrastructure_risk',     label: 'Infra. Risk',      invert: true  },
-    { key: 'neighborhood_stability',  label: 'Nbhd. Stability',  invert: false },
-    { key: 'hidden_risk',             label: 'Hidden Risk',      invert: true  },
+    { key: 'livability',             label: 'Livability',       invert: false },
+    { key: 'environmental_exposure', label: 'Env. Exposure',    invert: true  },
+    { key: 'infrastructure_risk',    label: 'Infra. Risk',      invert: true  },
+    { key: 'neighborhood_stability', label: 'Nbhd. Stability',  invert: false },
+    { key: 'hidden_risk',            label: 'Hidden Risk',      invert: true  },
   ];
 
   defs.forEach(def => {
     const val = scores[def.key] || 0;
     const colorClass = getScoreColor(val, def.invert);
+    const bullets = (evidence && evidence[def.key]) || [];
+    const bulletHtml = bullets.length
+      ? `<ul class="score-evidence-list">${bullets.map(b => `<li>${b}</li>`).join('')}</ul>`
+      : '';
+
     const card = document.createElement('div');
     card.className = 'score-card';
     card.innerHTML = `
-      <div class="score-label">${def.label}</div>
-      <div class="score-value score-${colorClass}" id="sv-${def.key}">0</div>
-      <div class="score-bar-bg">
-        <div class="score-bar bar-${colorClass}" id="sb-${def.key}"></div>
-      </div>`;
+      <div class="score-left">
+        <div class="score-label">${def.label}</div>
+        <div class="score-value score-${colorClass}" id="sv-${def.key}">0</div>
+        <div class="score-bar-bg"><div class="score-bar bar-${colorClass}" id="sb-${def.key}"></div></div>
+      </div>
+      <div class="score-right">${bulletHtml}</div>`;
     grid.appendChild(card);
-    animateScore(def.key, val, colorClass);
+    animateScore(def.key, val);
   });
 }
 
 function getScoreColor(val, invert) {
-  const effective = invert ? (100 - val) : val;
-  if (effective >= 70) return 'green';
-  if (effective >= 40) return 'amber';
+  const eff = invert ? (100 - val) : val;
+  if (eff >= 70) return 'green';
+  if (eff >= 40) return 'amber';
   return 'red';
 }
 
-function animateScore(key, target, colorClass) {
+function animateScore(key, target) {
   const el  = document.getElementById(`sv-${key}`);
   const bar = document.getElementById(`sb-${key}`);
   if (!el || !bar) return;
   const start = performance.now();
-  const duration = 800;
   function frame(now) {
-    const elapsed = now - start;
-    const progress = Math.min(elapsed / duration, 1);
+    const progress = Math.min((now - start) / 800, 1);
     const ease = 1 - Math.pow(1 - progress, 3);
-    const current = Math.round(target * ease);
-    el.textContent = current;
-    bar.style.width = `${current}%`;
+    el.textContent = Math.round(target * ease);
+    bar.style.width = `${target * ease}%`;
     if (progress < 1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 }
 
-// ── Breakdown ─────────────────────────────────────────────
+// ── Nearby risks ring ─────────────────────────────────────
+
+const SEV_COLOR = { critical: '#7c3aed', high: '#dc2626', medium: '#ea580c', low: '#f59e0b' };
+
+function renderNearbyRisks(risks) {
+  const card = document.getElementById('nearbyCard');
+  const legend = document.getElementById('ringLegend');
+  if (!risks || risks.length === 0) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  drawRingCanvas(risks);
+
+  legend.innerHTML = risks.map(r => `
+    <div class="ring-legend-item">
+      <span class="ring-dot ring-dot-${r.severity}"></span>
+      <span>
+        <span class="ring-item-name">${r.name}</span>
+        <span class="ring-item-dist"> — ${r.distance_label}</span>
+      </span>
+    </div>`).join('');
+}
+
+function drawRingCanvas(risks) {
+  const canvas = document.getElementById('ringCanvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const cx = W / 2, cy = H / 2;
+  ctx.clearRect(0, 0, W, H);
+
+  // 3 rings: 300m, 1km, 3mi radius in canvas px
+  const rings = [
+    { label: '300m',  r: 55,  color: 'rgba(220,38,38,.08)' },
+    { label: '1km',   r: 100, color: 'rgba(234,88,12,.06)' },
+    { label: '3 mi',  r: 140, color: 'rgba(245,158,11,.05)' },
+  ];
+
+  rings.forEach(ring => {
+    ctx.beginPath();
+    ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
+    ctx.fillStyle = ring.color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#9ca3af';
+    ctx.font = '10px Inter';
+    ctx.textAlign = 'left';
+    ctx.fillText(ring.label, cx + ring.r + 4, cy + 4);
+  });
+
+  // Property dot at center
+  ctx.beginPath();
+  ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#1e3a5f';
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 9px Inter';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('P', cx, cy);
+
+  // Place risk dots around rings
+  const maxDistM = 5000;
+  const maxR = 140;
+
+  // Group risks without a bearing — spread them evenly by angle
+  const noBearing = risks.filter(r => r.bearing_deg == null);
+  const hasBearing = risks.filter(r => r.bearing_deg != null);
+  const angleStep = noBearing.length > 0 ? (360 / noBearing.length) : 0;
+
+  [...hasBearing, ...noBearing].forEach((risk, i) => {
+    const distM = risk.distance_m ?? 800;
+    const ratio = Math.min(distM / maxDistM, 1);
+    const rPx = 18 + ratio * (maxR - 18);
+
+    let angleDeg;
+    if (risk.bearing_deg != null) {
+      angleDeg = risk.bearing_deg - 90; // chart.js convention: 0=right
+    } else {
+      angleDeg = i * angleStep - 90;
+    }
+    const rad = angleDeg * Math.PI / 180;
+    const x = cx + rPx * Math.cos(rad);
+    const y = cy + rPx * Math.sin(rad);
+
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = SEV_COLOR[risk.severity] || '#9ca3af';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  });
+
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ── Price context ─────────────────────────────────────────
+
+function renderPriceContext(pc) {
+  const card = document.getElementById('priceCard');
+  if (!pc) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  const medEl = document.getElementById('priceMedian');
+  if (pc.area_median_value && pc.area_median_value > 0) {
+    medEl.innerHTML = `
+      <div class="price-stat-label">Area Median Home Value</div>
+      <div class="price-stat-value">$${pc.area_median_value.toLocaleString()}</div>
+      <div class="price-stat-sub">US Census ACS 2022 — census tract</div>`;
+  } else {
+    medEl.innerHTML = `
+      <div class="price-stat-label">Area Median Home Value</div>
+      <div class="price-stat-value" style="font-size:1rem;color:var(--muted)">Not available</div>`;
+  }
+
+  const pct = pc.estimated_impact_pct || 0;
+  const impEl = document.getElementById('priceImpact');
+  let cls, sign, label;
+  if (pct > 0)      { cls = 'impact-positive'; sign = '+'; label = 'Est. premium vs area'; }
+  else if (pct < 0) { cls = 'impact-negative'; sign = '';  label = 'Est. discount vs area'; }
+  else              { cls = 'impact-neutral';  sign = '';  label = 'Neutral vs area median'; }
+  impEl.className = `price-impact-badge ${cls}`;
+  impEl.textContent = pct !== 0 ? `${sign}${pct}%  ${label}` : label;
+
+  const driversEl = document.getElementById('priceDrivers');
+  driversEl.innerHTML = (pc.impact_drivers || [])
+    .map(d => `<li>${d}</li>`).join('');
+}
+
+// ── Score breakdown ───────────────────────────────────────
 
 function toggleBreakdown() {
   const body    = document.getElementById('breakdownBody');
@@ -172,13 +358,13 @@ function toggleBreakdown() {
 function renderBreakdown(bd) {
   const body = document.getElementById('breakdownBody');
   const items = [
-    { label: 'Env Raw',      sublabel: 'fetcher',  key: 'env_raw'        },
-    { label: 'Env Agent',    sublabel: 'LLM',      key: 'env_agent'      },
-    { label: 'Infra Raw',    sublabel: 'fetcher',  key: 'infra_raw'      },
-    { label: 'Infra Agent',  sublabel: 'LLM',      key: 'infra_agent'    },
-    { label: 'Nbhd Raw',     sublabel: 'fetcher',  key: 'nbhd_raw'       },
-    { label: 'Nbhd Agent',   sublabel: 'LLM',      key: 'nbhd_agent'     },
-    { label: 'Elevation',    sublabel: 'USGS',     key: 'elevation_score'},
+    { label: 'Env Raw',     sublabel: 'fetcher',  key: 'env_raw'         },
+    { label: 'Env Agent',   sublabel: 'LLM',      key: 'env_agent'       },
+    { label: 'Infra Raw',   sublabel: 'fetcher',  key: 'infra_raw'       },
+    { label: 'Infra Agent', sublabel: 'LLM',      key: 'infra_agent'     },
+    { label: 'Nbhd Raw',    sublabel: 'fetcher',  key: 'nbhd_raw'        },
+    { label: 'Nbhd Agent',  sublabel: 'LLM',      key: 'nbhd_agent'      },
+    { label: 'Elevation',   sublabel: 'USGS',     key: 'elevation_score' },
   ];
   body.innerHTML = items.map(it => `
     <div class="bd-item">
@@ -188,54 +374,45 @@ function renderBreakdown(bd) {
     </div>`).join('');
 }
 
-// ── Risks ─────────────────────────────────────────────────
+// ── Risk factors ──────────────────────────────────────────
 
 function renderRisks(risks) {
   const list = document.getElementById('risksList');
   const countEl = document.getElementById('riskCount');
   list.innerHTML = '';
-
   if (!risks || risks.length === 0) {
     countEl.textContent = '0';
     list.innerHTML = '<p style="font-size:.875rem;color:var(--muted);padding:.5rem 0">No significant risks identified.</p>';
     return;
   }
-
   countEl.textContent = risks.length;
-
   const order = { critical: 0, high: 1, medium: 2, low: 3 };
-  const sorted = [...risks].sort((a, b) => (order[a.severity] ?? 99) - (order[b.severity] ?? 99));
-
-  sorted.forEach(risk => {
-    const card = document.createElement('div');
-    card.className = `risk-card severity-${risk.severity}`;
-    const evidence = (risk.evidence || []).map(e => `<li>${e}</li>`).join('');
-    card.innerHTML = `
-      <div class="risk-header" onclick="toggleRisk(this)">
-        <span class="risk-title">${formatCategory(risk.category)}</span>
-        <div class="risk-right">
-          <span class="severity-badge badge-${risk.severity}">${risk.severity}</span>
-          <span class="expand-icon">▼</span>
+  [...risks].sort((a, b) => (order[a.severity] ?? 99) - (order[b.severity] ?? 99))
+    .forEach(risk => {
+      const card = document.createElement('div');
+      card.className = `risk-card severity-${risk.severity}`;
+      const evidence = (risk.evidence || []).map(e => `<li>${e}</li>`).join('');
+      card.innerHTML = `
+        <div class="risk-header" onclick="toggleRisk(this)">
+          <span class="risk-title">${formatCategory(risk.category)}</span>
+          <div class="risk-right">
+            <span class="severity-badge badge-${risk.severity}">${risk.severity}</span>
+            <span class="expand-icon">▼</span>
+          </div>
         </div>
-      </div>
-      <div class="risk-body">
-        <p class="risk-description">${risk.description}</p>
-        ${evidence ? `<ul class="risk-evidence">${evidence}</ul>` : ''}
-        <div class="risk-meta">
-          Confidence: ${risk.confidence}%${risk.timeline ? ` · Timeline: ${risk.timeline}` : ''}${risk.confidence < 40 ? ' · ⚠ low confidence' : ''}
-        </div>
-      </div>`;
-    list.appendChild(card);
-  });
+        <div class="risk-body">
+          <p class="risk-description">${risk.description}</p>
+          ${evidence ? `<ul class="risk-evidence">${evidence}</ul>` : ''}
+          <div class="risk-meta">
+            Confidence: ${risk.confidence}%${risk.timeline ? ` · Timeline: ${risk.timeline}` : ''}${risk.confidence < 40 ? ' · ⚠ low confidence' : ''}
+          </div>
+        </div>`;
+      list.appendChild(card);
+    });
 }
 
-function toggleRisk(header) {
-  header.closest('.risk-card').classList.toggle('expanded');
-}
-
-function formatCategory(cat) {
-  return cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
+function toggleRisk(header) { header.closest('.risk-card').classList.toggle('expanded'); }
+function formatCategory(cat) { return cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
 
 // ── Helpers ───────────────────────────────────────────────
 
@@ -250,7 +427,7 @@ function showError(msg) {
 function hideError()    { document.getElementById('errorBanner').classList.add('hidden'); }
 function disableBtn(v)  { document.getElementById('analyzeBtn').disabled = v; }
 function resetSteps() {
-  [1, 2, 3, 4].forEach(i => {
+  [1,2,3,4].forEach(i => {
     const el = document.getElementById(`step${i}`);
     if (el) el.classList.remove('active', 'done');
   });

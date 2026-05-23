@@ -22,6 +22,9 @@ class PropertyState(TypedDict):
     narrative: Optional[str]
     mode_advice: Optional[str]
     overall_confidence: Optional[int]
+    score_evidence: Optional[dict]
+    recommendation: Optional[dict]
+    price_impact: Optional[dict]
 
 
 async def parallel_agents_node(state: PropertyState) -> PropertyState:

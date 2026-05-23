@@ -33,6 +33,7 @@ ACS_VARS = ",".join([
     "B15003_022E",   # bachelor's degree holders (25+)
     "B15003_001E",   # total population 25+ (denominator for education)
     "B19083_001E",   # Gini index of income inequality
+    "B25077_001E",   # median home value (owner-occupied)
 ])
 
 
@@ -165,6 +166,7 @@ async def get_demographics(lat: float, lon: float) -> dict:
             row = await _get_acs(client, state, county, tract)
 
         # ── Raw counts ────────────────────────────────────────────────
+        median_home_value = _safe_int(row.get("B25077_001E"), -1)
         median_income    = _safe_int(row.get("B19013_001E"), -1)
         population       = _safe_int(row.get("B01003_001E"))
         poverty_pop      = _safe_int(row.get("B17001_002E"))
@@ -217,6 +219,7 @@ async def get_demographics(lat: float, lon: float) -> dict:
             "labor_force":       labor_force,
 
             # Key indicators
+            "median_home_value":        median_home_value if median_home_value > 0 else None,
             "median_household_income":  median_income,
             "median_year_built":        median_yr_built if median_yr_built > 1800 else None,
             "housing_age_years":        housing_age_years,

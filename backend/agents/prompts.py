@@ -201,13 +201,24 @@ Neighborhood Agent Report: {neighborhood_report}
 Your tasks:
 1. Combine all risks and remove duplicates
 2. Write ONE causal narrative paragraph (150-200 words) explaining the property's risk profile
-   - Must explain HOW the risks connect (e.g. "The flood risk combined with an aging infrastructure corridor suggests...")
-   - Must cite evidence (e.g. "per FEMA NFHL data...")
-   - Must NOT be a bullet list — it must be a flowing paragraph
+   - Must explain HOW the risks connect
+   - Must cite specific data evidence
+   - Must NOT be a bullet list — flowing paragraph only
 3. Write mode-specific advice (2-3 sentences) for a {mode}
 4. Compute final scores (0-100, where 100 is BEST for livability/stability, WORST for risks)
-5. If you have insufficient data to make a claim, say 'insufficient data' — never invent risks.
-6. Flag any risk with confidence < 40 as "low confidence — verify independently."
+5. For each score write 2-3 SHORT evidence bullets (max 12 words each) — concrete facts from the data, not generic statements
+6. Make a clear decision recommendation for a {mode}: BUY / NEGOTIATE / CAUTION / AVOID
+   - BUY: overall score 70+, no critical risks
+   - NEGOTIATE: 1+ high risks that affect price, but property is sound
+   - CAUTION: critical environmental or flood risk, or score 35-55
+   - AVOID: multiple critical risks, or score below 35
+7. Estimate price impact vs area median based on risk profile:
+   - SFHA flood zone: typically -5% to -12%
+   - Superfund/Tier-1 EPA within 0.5mi: typically -10% to -20%
+   - Railway/highway < 200m: typically -3% to -7%
+   - High neighborhood stability: +2% to +5%
+   - Low environmental risk: neutral to +2%
+8. If you have insufficient data, say so — never invent facts.
 
 Respond ONLY with valid JSON:
 {{
@@ -218,12 +229,31 @@ Respond ONLY with valid JSON:
     "neighborhood_stability": 68,
     "hidden_risk": 35
   }},
+  "score_evidence": {{
+    "livability": ["Elevation 42ft — well above flood level", "Stable neighborhood, income above national avg", "No major infrastructure hazards nearby"],
+    "environmental_exposure": ["FEMA Zone X — outside special flood hazard area", "No EPA facilities within 1.5 miles", "Elevation score 74/100"],
+    "infrastructure_risk": ["No railway within 1km", "Highway 650m away — below noise threshold", "Power substation at 380m — low risk"],
+    "neighborhood_stability": ["Median income $94k — 26% above national avg", "Owner occupancy 72% vs national 64.8%", "Unemployment 3.1% — below national 4.0%"],
+    "hidden_risk": ["No SFHA — flood insurance not mandatory", "No Tier-1 EPA facilities in 3mi radius", "Stable market signals, low vacancy"]
+  }},
+  "recommendation": {{
+    "verdict": "BUY",
+    "score": 76,
+    "summary": "Low environmental risk, stable neighborhood, and no mandatory flood insurance make this a sound purchase. Minor infrastructure exposure at 380m can be monitored but does not materially affect value.",
+    "key_factors": ["No SFHA flood zone — no mandatory insurance cost", "Neighborhood income 26% above national avg", "No Tier-1 EPA hazards in 3-mile radius"]
+  }},
+  "price_impact": {{
+    "estimated_impact_pct": 2,
+    "impact_drivers": ["Low flood risk (Zone X): neutral to +2% vs flood-exposed comparables", "Above-average neighborhood stability: +2% to +4%", "Minor infrastructure (substation 380m): negligible discount"]
+  }},
   "narrative": "Full causal paragraph here...",
   "mode_advice": "Mode-specific 2-3 sentence advice here...",
-  "top_risks": [],
   "overall_confidence": 76
 }}
 
 Rules:
 - Only output JSON, no preamble or explanation outside the JSON
+- score_evidence bullets must be SHORT (max 12 words), specific, and cite actual data values
+- Do not invent data not present in the agent reports
+- estimated_impact_pct is an integer: negative = discount vs area median, positive = premium
 """

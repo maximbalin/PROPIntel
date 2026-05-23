@@ -7,6 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -35,8 +36,7 @@
       <div class="search-card">
         <div class="search-top">
           <input type="text" id="addressInput" class="address-input"
-            placeholder="Enter a US property address…"
-            autocomplete="off" />
+            placeholder="Enter a US property address…" autocomplete="off" />
           <button class="analyze-btn" id="analyzeBtn">
             <span class="btn-icon">→</span> Analyze
           </button>
@@ -85,30 +85,66 @@
         </div>
         <div class="result-meta-right">
           <span class="mode-chip" id="resultMode"></span>
-          <span class="confidence-chip">
-            Confidence: <strong id="confidenceValue"></strong>
-          </span>
+          <span class="confidence-chip">Confidence: <strong id="confidenceValue"></strong></span>
         </div>
       </div>
 
-      <!-- Score cards -->
-      <div class="scores-grid" id="scoresGrid"></div>
+      <!-- Decision banner -->
+      <div class="decision-banner hidden" id="decisionBanner">
+        <div class="decision-left">
+          <div class="decision-verdict" id="decisionVerdict"></div>
+          <div class="decision-score-wrap">
+            <span class="decision-score-label">Decision score</span>
+            <span class="decision-score" id="decisionScore"></span>
+          </div>
+        </div>
+        <div class="decision-right">
+          <div class="decision-summary" id="decisionSummary"></div>
+          <ul class="decision-factors" id="decisionFactors"></ul>
+        </div>
+      </div>
+
+      <!-- Radar chart + score cards -->
+      <div class="radar-scores-row">
+        <div class="radar-card">
+          <div class="card-label"><span class="label-icon">🕸</span> Risk Profile</div>
+          <div class="radar-wrap"><canvas id="radarChart"></canvas></div>
+        </div>
+        <div class="scores-col" id="scoresGrid"></div>
+      </div>
+
+      <!-- Nearby risks ring -->
+      <div class="nearby-card" id="nearbyCard">
+        <div class="card-label"><span class="label-icon">📡</span> Nearby Risks by Distance</div>
+        <div class="ring-layout">
+          <canvas id="ringCanvas" width="300" height="300"></canvas>
+          <div class="ring-legend" id="ringLegend"></div>
+        </div>
+      </div>
+
+      <!-- Price context -->
+      <div class="price-card hidden" id="priceCard">
+        <div class="card-label"><span class="label-icon">💰</span> Price Context</div>
+        <div class="price-body">
+          <div class="price-stat" id="priceMedian"></div>
+          <div class="price-impact-badge" id="priceImpact"></div>
+          <ul class="price-drivers" id="priceDrivers"></ul>
+        </div>
+      </div>
 
       <!-- Score breakdown (collapsible) -->
       <div class="breakdown-section" id="breakdownSection" style="display:none">
         <button class="breakdown-toggle" onclick="toggleBreakdown()">
-          <span>Score Breakdown</span>
+          <span>Score Breakdown (raw signals vs AI agents)</span>
           <span class="breakdown-chevron" id="breakdownChevron">›</span>
         </button>
         <div class="breakdown-body hidden" id="breakdownBody"></div>
       </div>
 
-      <!-- Two-column layout: narrative + advice -->
+      <!-- Narrative + advice -->
       <div class="cards-row">
         <div class="narrative-card">
-          <div class="card-label">
-            <span class="label-icon">🤖</span> AI Risk Narrative
-          </div>
+          <div class="card-label"><span class="label-icon">🤖</span> AI Risk Narrative</div>
           <div class="narrative-text" id="narrativeText"></div>
         </div>
         <div class="advice-card" id="adviceCard">
@@ -136,7 +172,8 @@
           <span id="sourcesList"></span>
         </div>
         <div class="footer-disclaimer">
-          For informational purposes only. Not a substitute for professional inspection.
+          For informational purposes only. Area median home value from US Census ACS 2022.
+          Actual sold comps require a licensed data provider. Not a substitute for professional inspection.
         </div>
       </div>
 

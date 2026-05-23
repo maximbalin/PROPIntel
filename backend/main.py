@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import math
 import uuid
 from pathlib import Path
 
@@ -16,7 +17,10 @@ from backend.config import get_settings
 from backend.data.fetcher import FreeDataFetcher
 from backend.database import close_pool, get_pool, run_migrations
 from backend.agents.graph import get_graph
-from backend.models import AnalyzeRequest, AnalyzeResponse, ScoreSet, ScoreBreakdown, RiskItem
+from backend.models import (
+    AnalyzeRequest, AnalyzeResponse, ScoreSet, ScoreBreakdown, RiskItem,
+    ScoreEvidence, Recommendation, PriceContext, NearbyRisk,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -63,6 +67,118 @@ async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
 
+def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Compass bearing in degrees (0=N, 90=E) from point 1 to point 2."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    x = math.sin(dlon) * math.cos(math.radians(lat2))
+    y = math.cos(math.radians(lat1)) * math.sin(math.radians(lat2)) - \
+        math.sin(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.cos(dlon)
+    return (math.degrees(math.atan2(x, y)) + 360) % 360
+
+
+def _build_nearby_risks(raw_data: dict, prop_lat: float, prop_lon: float) -> list[NearbyRisk]:
+    risks: list[NearbyRisk] = []
+
+    # FEMA flood zone at property
+    fema = raw_data.get("fema", {})
+    if fema.get("sfha"):
+        risks.append(NearbyRisk(
+            name=f"SFHA Flood Zone {fema.get('flood_zone', '')}",
+            category="flood",
+            distance_label="at property",
+            severity="high",
+            distance_m=0,
+        ))
+    elif fema.get("risk_level") in ("critical", "high"):
+        risks.append(NearbyRisk(
+            name=f"Flood Zone {fema.get('flood_zone', '')} ({fema.get('risk_level', '')})",
+            category="flood",
+            distance_label="at property",
+            severity=fema.get("risk_level", "medium"),
+            distance_m=0,
+        ))
+
+    # EPA facilities with exact bearing
+    epa = raw_data.get("epa", {})
+    for fac in (epa.get("top_facilities") or [])[:6]:
+        dist_mi = fac.get("distance_miles", 0) or 0
+        dist_m = dist_mi * 1609.34
+        fac_lat = fac.get("lat") or fac.get("FacLat")
+        fac_lon = fac.get("lon") or fac.get("FacLong")
+        bearing = _bearing(prop_lat, prop_lon, float(fac_lat), float(fac_lon)) \
+            if fac_lat and fac_lon else None
+        tier = fac.get("tier", 3)
+        if dist_mi < 0.5 and tier == 1:
+            sev = "critical"
+        elif tier == 1:
+            sev = "high"
+        elif tier == 2 and dist_mi < 1.0:
+            sev = "high"
+        elif tier == 2:
+            sev = "medium"
+        else:
+            sev = "low"
+        if dist_mi < 0.1:
+            dist_label = f"{int(dist_m)}m"
+        else:
+            dist_label = f"{dist_mi:.1f} mi"
+        risks.append(NearbyRisk(
+            name=fac.get("name", "EPA Facility"),
+            category="pollution",
+            distance_label=dist_label,
+            severity=sev,
+            distance_m=dist_m,
+            bearing_deg=bearing,
+        ))
+
+    # OSM infrastructure by distance
+    osm = raw_data.get("osm", {})
+    near = osm.get("within_300m", {})
+    far  = osm.get("within_1000m", {})
+    cat_names = {
+        "railway":      "Railway",
+        "power_line":   "Power Line",
+        "highway":      "Highway",
+        "industrial":   "Industrial Zone",
+        "landfill":     "Landfill",
+        "substation":   "Electrical Substation",
+        "fuel_station": "Fuel Station",
+        "airport":      "Airport",
+    }
+    for cat, label in cat_names.items():
+        data = near.get(cat) or far.get(cat)
+        if not data or data.get("count", 0) == 0:
+            continue
+        nearest = data.get("nearest_m")
+        if nearest is not None:
+            dist_m = float(nearest)
+            dist_label = f"{int(dist_m)}m"
+        else:
+            dist_m = 750.0
+            dist_label = "< 1km"
+        if cat in ("railway", "power_line") and dist_m < 150:
+            sev = "high"
+        elif cat == "landfill":
+            sev = "high" if dist_m < 500 else "medium"
+        elif dist_m < 200:
+            sev = "high"
+        elif dist_m < 500:
+            sev = "medium"
+        else:
+            sev = "low"
+        risks.append(NearbyRisk(
+            name=label,
+            category="infrastructure",
+            distance_label=dist_label,
+            severity=sev,
+            distance_m=dist_m,
+        ))
+
+    sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    return sorted(risks, key=lambda r: (sev_order.get(r.severity, 9), r.distance_m or 9999))
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
@@ -100,6 +216,9 @@ async def analyze(req: AnalyzeRequest):
         "narrative": None,
         "mode_advice": None,
         "overall_confidence": None,
+        "score_evidence": None,
+        "recommendation": None,
+        "price_impact": None,
     }
 
     final_state = await graph.ainvoke(initial_state)
@@ -114,6 +233,34 @@ async def analyze(req: AnalyzeRequest):
     )
     debug = scores_dict.get("_debug", {})
     score_breakdown = ScoreBreakdown(**{k: debug.get(k, 50) for k in ScoreBreakdown.model_fields}) if debug else None
+
+    # Score evidence from LLM
+    raw_evidence = final_state.get("score_evidence") or {}
+    score_evidence = ScoreEvidence(**{
+        k: raw_evidence.get(k, []) for k in ScoreEvidence.model_fields
+    }) if raw_evidence else None
+
+    # Decision recommendation from LLM
+    raw_rec = final_state.get("recommendation") or {}
+    recommendation = Recommendation(
+        verdict=raw_rec.get("verdict", "CAUTION"),
+        score=int(raw_rec.get("score", 50)),
+        summary=raw_rec.get("summary", ""),
+        key_factors=raw_rec.get("key_factors", []),
+    ) if raw_rec else None
+
+    # Price context — LLM impact + Census area median value
+    raw_pi = final_state.get("price_impact") or {}
+    census = raw_data.get("census", {})
+    area_median = census.get("median_home_value") if isinstance(census, dict) else None
+    price_context = PriceContext(
+        area_median_value=area_median,
+        estimated_impact_pct=int(raw_pi.get("estimated_impact_pct", 0)),
+        impact_drivers=raw_pi.get("impact_drivers", []),
+    ) if (raw_pi or area_median) else None
+
+    # Nearby risks derived from raw fetcher data
+    nearby_risks = _build_nearby_risks(raw_data, lat, lon)
 
     raw_risks = final_state.get("risks", []) or []
     risks = []
@@ -149,6 +296,10 @@ async def analyze(req: AnalyzeRequest):
         mode=req.mode.value,
         scores=score_set,
         score_breakdown=score_breakdown,
+        score_evidence=score_evidence,
+        recommendation=recommendation,
+        price_context=price_context,
+        nearby_risks=nearby_risks,
         risks=risks,
         narrative=final_state.get("narrative", ""),
         mode_advice=final_state.get("mode_advice", ""),
