@@ -75,7 +75,7 @@ class FreeDataFetcher:
             return float(results[0]["lat"]), float(results[0]["lon"])
 
     async def fetch_all(self, lat: float, lon: float, force_refresh: bool = False) -> dict:
-        cache_key = f"raw:v6:{lat:.4f}:{lon:.4f}"
+        cache_key = f"raw:v7:{lat:.4f}:{lon:.4f}"
         redis = await get_redis()
 
         if not force_refresh:
@@ -102,32 +102,50 @@ class FreeDataFetcher:
 
         osm_result = safe(remaining[1])
 
-        # ── Google Maps Roads fallback ─────────────────────────
-        # If Overpass returned no road data at all, use Google Geocoding API
-        # to reverse-geocode sample points and detect nearby major roads.
+        # ── Road-data fallback chain ───────────────────────────
+        # If Overpass returned no road data, try:
+        #   1. US Census TIGER REST API (fast, reliable, no key)
+        #   2. OSM Nominatim reverse-geocode (slow, last resort)
         major_roads = osm_result.get("major_roads") or {}
         has_any_road = any(major_roads.get(cls, {}).get("count", 0) > 0
                            for cls in ("motorway", "trunk", "primary", "secondary"))
 
         if not has_any_road:
+            fallback_roads = {}
+            fallback_source = ""
+
+            # Try TIGER first — single fast request, government uptime
             try:
-                from backend.data.osm_nominatim import get_nearby_roads_nominatim
-                nominatim_roads = await get_nearby_roads_nominatim(lat, lon)
-                if nominatim_roads:
-                    merged_roads = {**major_roads, **nominatim_roads}
-                    near   = osm_result.get("within_300m",  {}) or {}
-                    far    = osm_result.get("within_1000m", {}) or {}
-                    scores = _compute_scores(near, far, merged_roads)
-                    osm_result = {
-                        **osm_result,
-                        "major_roads":  merged_roads,
-                        "noise_score":  scores["noise_score"],
-                        "hazard_score": scores["hazard_score"],
-                        "road_source":  "OpenStreetMap Nominatim (Overpass fallback)",
-                    }
-                    logger.info(f"Nominatim fallback merged: {list(nominatim_roads.keys())}")
+                from backend.data.tiger_roads import get_nearby_roads_tiger
+                fallback_roads = await get_nearby_roads_tiger(lat, lon)
+                if fallback_roads:
+                    fallback_source = "US Census TIGER/Web REST API"
             except Exception as e:
-                logger.warning(f"Nominatim fallback failed: {e}")
+                logger.warning(f"TIGER fallback failed: {e}")
+
+            # If TIGER also empty, try Nominatim reverse-geocode
+            if not fallback_roads:
+                try:
+                    from backend.data.osm_nominatim import get_nearby_roads_nominatim
+                    fallback_roads = await get_nearby_roads_nominatim(lat, lon)
+                    if fallback_roads:
+                        fallback_source = "OpenStreetMap Nominatim (last-resort fallback)"
+                except Exception as e:
+                    logger.warning(f"Nominatim fallback failed: {e}")
+
+            if fallback_roads:
+                merged_roads = {**major_roads, **fallback_roads}
+                near   = osm_result.get("within_300m",  {}) or {}
+                far    = osm_result.get("within_1000m", {}) or {}
+                scores = _compute_scores(near, far, merged_roads)
+                osm_result = {
+                    **osm_result,
+                    "major_roads":  merged_roads,
+                    "noise_score":  scores["noise_score"],
+                    "hazard_score": scores["hazard_score"],
+                    "road_source":  fallback_source,
+                }
+                logger.info(f"Road fallback ({fallback_source}): {list(fallback_roads.keys())}")
 
         crash_result = safe(remaining[4])
         traffic_data = enrich_traffic_data(
