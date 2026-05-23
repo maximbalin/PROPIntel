@@ -845,14 +845,23 @@ async def analyze(
     listing_data = None
     if isinstance(listing_raw, dict) and not listing_raw.get("error"):
         listing_data = ListingData(
-            price      =listing_raw.get("price"),
-            beds       =listing_raw.get("beds"),
-            baths      =listing_raw.get("baths"),
-            sqft       =listing_raw.get("sqft"),
-            year_built =listing_raw.get("year_built"),
-            listing_url=listing_raw.get("listing_url"),
-            photos     =listing_raw.get("photos", []),
-            source     =listing_raw.get("source"),
+            price           =listing_raw.get("price"),
+            beds            =listing_raw.get("beds"),
+            baths           =listing_raw.get("baths"),
+            sqft            =listing_raw.get("sqft"),
+            year_built      =listing_raw.get("year_built"),
+            property_type   =listing_raw.get("property_type"),
+            lot_size_sqft   =listing_raw.get("lot_size_sqft"),
+            hoa_fee_monthly =listing_raw.get("hoa_fee_monthly"),
+            tax_annual      =listing_raw.get("tax_annual"),
+            status          =listing_raw.get("status"),
+            days_on_market  =listing_raw.get("days_on_market"),
+            garage_spaces   =listing_raw.get("garage_spaces"),
+            heating_cooling =listing_raw.get("heating_cooling"),
+            description     =listing_raw.get("description"),
+            listing_url     =listing_raw.get("listing_url"),
+            photos          =listing_raw.get("photos", []),
+            source          =listing_raw.get("source"),
         )
     elif isinstance(listing_raw, dict) and listing_raw.get("error"):
         listing_data = ListingData(error=listing_raw["error"])

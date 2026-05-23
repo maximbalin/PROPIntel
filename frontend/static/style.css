@@ -347,13 +347,23 @@ body {
 .footer-label   { font-weight: 600; color: var(--text-sub); }
 .footer-disclaimer { font-size: 0.75rem; color: var(--muted-light); }
 
-/* ── Property listing card ───────────────────────────────── */
+/* ── Property listing section ────────────────────────────── */
+.listing-section { margin-bottom: 1.5rem; }
+.listing-section .section-header { margin-bottom: 0.75rem; }
+.listing-section-sources {
+  font-size: 0.8rem; color: var(--muted); font-weight: 400;
+  margin-left: 0.5rem;
+}
+.listing-empty {
+  background: #f8fafc; border: 1.5px dashed #cbd5e1;
+  border-radius: var(--radius); padding: 1rem 1.25rem;
+  color: var(--muted); font-size: 0.9rem; text-align: center;
+}
 .listing-card {
   border-radius: var(--radius); border: 1.5px solid #e2e8f0;
-  background: #fff; margin-bottom: 1.25rem;
-  box-shadow: var(--shadow); overflow: hidden;
+  background: #fff; overflow: hidden;
+  box-shadow: var(--shadow);
 }
-.listing-card.hidden { display: none; }
 .listing-inner { display: flex; gap: 0; }
 .listing-photo-strip {
   flex-shrink: 0; width: 220px; max-height: 180px;

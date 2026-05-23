@@ -91,9 +91,6 @@
         </div>
       </div>
 
-      <!-- Property listing card (Zillow / Redfin) -->
-      <div id="listingCard" class="listing-card hidden"></div>
-
       <!-- Decision banner -->
       <div class="decision-banner hidden" id="decisionBanner">
         <div class="decision-left">
@@ -159,6 +156,18 @@
           </table>
         </div>
         <div class="hc-total" id="hiddenCostsTotal"></div>
+      </div>
+
+      <!-- Property Listing Data -->
+      <div class="listing-section" id="listingSection">
+        <div class="section-header">
+          <h3 class="section-title">Property Listing Data</h3>
+          <span class="listing-section-sources" id="listingSectionSources"></span>
+        </div>
+        <div id="listingCard" class="listing-card"></div>
+        <div id="listingEmpty" class="listing-empty hidden">
+          No listing data found for this address on Realtor.com, Zillow, or Redfin.
+        </div>
       </div>
 
       <!-- Price context -->

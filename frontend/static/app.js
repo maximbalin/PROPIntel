@@ -100,14 +100,26 @@ function renderResults(data) {
   showResults();
 }
 
-// ── Property listing card ─────────────────────────────────
+// ── Property listing section ──────────────────────────────
 
 function renderListingData(listing) {
-  const card = document.getElementById('listingCard');
-  if (!listing || listing.error || (!listing.price && !listing.beds && !listing.sqft)) {
-    card.classList.add('hidden');
+  const card    = document.getElementById('listingCard');
+  const empty   = document.getElementById('listingEmpty');
+  const srcSpan = document.getElementById('listingSectionSources');
+
+  const hasAnyData = listing && !listing.error && (
+    listing.price || listing.beds || listing.sqft || listing.description ||
+    listing.listing_url || listing.year_built || listing.status
+  );
+
+  if (!hasAnyData) {
+    card.innerHTML = '';
+    if (empty) empty.classList.remove('hidden');
+    if (srcSpan) srcSpan.textContent = '';
     return;
   }
+  if (empty) empty.classList.add('hidden');
+  if (srcSpan) srcSpan.textContent = listing.source ? `via ${listing.source}` : '';
 
   const photoHtml = (listing.photos && listing.photos.length)
     ? `<img src="${listing.photos[0]}" alt="Property photo" loading="lazy">`
@@ -121,7 +133,6 @@ function renderListingData(listing) {
     ? `<div class="listing-price">$${listing.price.toLocaleString()} ${statusBadge}</div>`
     : statusBadge ? `<div class="listing-price">${statusBadge}</div>` : '';
 
-  // Primary specs row
   const specs = [];
   if (listing.beds)          specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🛏</span>${listing.beds} bed${listing.beds !== 1 ? 's' : ''}</span>`);
   if (listing.baths)         specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚿</span>${listing.baths} bath${listing.baths !== 1 ? 's' : ''}</span>`);
@@ -130,38 +141,33 @@ function renderListingData(listing) {
   if (listing.lot_size_sqft) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🌳</span>${listing.lot_size_sqft.toLocaleString()} sqft lot</span>`);
   if (listing.garage_spaces) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚗</span>${listing.garage_spaces}-car garage</span>`);
 
-  // Financial details row (HOA, taxes, DOM)
   const fin = [];
+  if (listing.property_type)           fin.push(`<span class="listing-fin-item"><strong>Type</strong> ${listing.property_type}</span>`);
   if (listing.hoa_fee_monthly != null) fin.push(`<span class="listing-fin-item"><strong>HOA</strong> $${listing.hoa_fee_monthly.toLocaleString()}/mo</span>`);
   if (listing.tax_annual != null)      fin.push(`<span class="listing-fin-item"><strong>Tax</strong> $${Math.round(listing.tax_annual).toLocaleString()}/yr</span>`);
-  if (listing.days_on_market != null)  fin.push(`<span class="listing-fin-item"><strong>DOM</strong> ${listing.days_on_market} days</span>`);
-  if (listing.property_type)           fin.push(`<span class="listing-fin-item"><strong>Type</strong> ${listing.property_type}</span>`);
+  if (listing.days_on_market != null)  fin.push(`<span class="listing-fin-item"><strong>Days on market</strong> ${listing.days_on_market}</span>`);
   if (listing.heating_cooling)         fin.push(`<span class="listing-fin-item"><strong>HVAC</strong> ${listing.heating_cooling}</span>`);
 
-  const finRow = fin.length ? `<div class="listing-fin-row">${fin.join('')}</div>` : '';
-
-  // Description (truncate at 200 chars)
+  const specsRow = specs.length ? `<div class="listing-specs">${specs.join('')}</div>` : '';
+  const finRow   = fin.length   ? `<div class="listing-fin-row">${fin.join('')}</div>`  : '';
   const descHtml = listing.description
-    ? `<div class="listing-desc">${listing.description.substring(0, 220)}${listing.description.length > 220 ? '…' : ''}</div>`
+    ? `<div class="listing-desc">"${listing.description.substring(0, 300)}${listing.description.length > 300 ? '…' : ''}"</div>`
     : '';
-
   const linkHtml = listing.listing_url
-    ? `<a class="listing-link" href="${listing.listing_url}" target="_blank" rel="noopener">View on ${listing.source || 'listing site'} →</a>`
+    ? `<a class="listing-link" href="${listing.listing_url}" target="_blank" rel="noopener">View full listing on ${listing.source || 'listing site'} →</a>`
     : '';
 
   card.innerHTML = `
     <div class="listing-inner">
       <div class="listing-photo-strip">${photoHtml}</div>
       <div class="listing-details">
-        <div class="listing-source-badge">🏠 Property Listing · ${listing.source || 'Unknown source'}</div>
         ${priceHtml}
-        <div class="listing-specs">${specs.join('')}</div>
+        ${specsRow}
         ${finRow}
         ${descHtml}
         ${linkHtml}
       </div>
     </div>`;
-  card.classList.remove('hidden');
 }
 
 // ── Decision banner ───────────────────────────────────────
