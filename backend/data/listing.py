@@ -271,66 +271,52 @@ def _extract_redfin(above: dict, below: dict, url_path: str) -> dict | None:
 
 # ── Zillow direct scraper ──────────────────────────────────────
 
-def _zillow_url_candidates(address: str) -> list[str]:
-    """Build Zillow property URL candidates directly from address, no autocomplete needed."""
-    import re
-    # "20 Pine St, Natick, MA 01760" → "20-Pine-St-Natick-MA-01760"
-    slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
-    return [
-        f"https://www.zillow.com/homes/{slug}_rb/",
-        f"https://www.zillow.com/homes/{slug}/",
-    ]
+async def _zillow_lookup_zpid(address: str, client: httpx.AsyncClient) -> tuple[int | None, str | None]:
+    """Use autocomplete to resolve an address → (zpid, detailUrl). Returns (None, None) on failure."""
+    for ac_url, ac_params in [
+        ("https://www.zillowstatic.com/autocomplete/v3/suggestions",
+         {"q": address, "clientId": "homepage-render"}),
+        ("https://www.zillow.com/autocomplete/v3/suggestions",
+         {"q": address, "clientId": "homepage-render"}),
+    ]:
+        try:
+            ac = await client.get(ac_url, params=ac_params)
+            if ac.status_code != 200:
+                continue
+            for result in ac.json().get("results", []):
+                meta = result.get("metaData", {})
+                zpid = meta.get("zpid")
+                detail_url = meta.get("detailUrl")
+                if zpid:
+                    return int(zpid), detail_url
+        except Exception:
+            continue
+    return None, None
 
 
 async def _fetch_zillow(address: str) -> dict | None:
     async with httpx.AsyncClient(
         timeout=20.0, follow_redirects=True, headers=_ZILLOW_HEADERS
     ) as client:
-        # Build URL directly — Zillow's autocomplete API frequently returns 400
-        full_url = None
-        for candidate in _zillow_url_candidates(address):
-            try:
-                page = await client.get(candidate)
-                if page.status_code == 200 and "__NEXT_DATA__" in page.text:
-                    full_url = str(page.url)
-                    break
-            except Exception:
-                continue
+        zpid, detail_url = await _zillow_lookup_zpid(address, client)
 
-        if not full_url:
-            # Fallback: autocomplete
-            for ac_url, ac_params in [
-                ("https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                 {"q": address, "clientId": "homepage-render"}),
-                ("https://www.zillow.com/autocomplete/v3/suggestions",
-                 {"q": address, "clientId": "homepage-render"}),
-            ]:
-                try:
-                    ac = await client.get(ac_url, params=ac_params)
-                    if ac.status_code == 200:
-                        suggestions = ac.json().get("results", [])
-                        if suggestions:
-                            home = next(
-                                (s for s in suggestions if s.get("resultType") == "Property"),
-                                suggestions[0],
-                            )
-                            detail_url = (
-                                home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
-                            )
-                            if detail_url:
-                                full_url = (
-                                    f"https://www.zillow.com{detail_url}"
-                                    if detail_url.startswith("/") else detail_url
-                                )
-                                break
-                except Exception:
-                    continue
+        # Build the homedetails URL (most specific → least specific)
+        slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+        if zpid and detail_url:
+            full_url = f"https://www.zillow.com{detail_url}" if detail_url.startswith("/") else detail_url
+        elif zpid:
+            full_url = f"https://www.zillow.com/homedetails/{slug}/{zpid}_zpid/"
+        else:
+            full_url = f"https://www.zillow.com/homes/{slug}_rb/"
 
-        if not full_url:
+        try:
+            page = await client.get(full_url)
+        except Exception:
             return None
 
-        page = await client.get(full_url)
-        page.raise_for_status()
+        if page.status_code != 200 or "__NEXT_DATA__" not in page.text:
+            logger.debug(f"Zillow page blocked or no data (HTTP {page.status_code}) for {full_url}")
+            return None
 
         m = re.search(
             r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
@@ -350,7 +336,7 @@ async def _fetch_zillow(address: str) -> dict | None:
 
         for value in gdp.values():
             if isinstance(value, dict) and "property" in value:
-                return _extract_zillow(value["property"], full_url)
+                return _extract_zillow(value["property"], str(page.url))
 
     return None
 
