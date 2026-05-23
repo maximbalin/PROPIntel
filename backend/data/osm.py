@@ -64,7 +64,7 @@ def _build_query(radius_m: int, lat: float, lon: float) -> str:
   way["amenity"~"^(hospital|clinic)$"](around:{radius_m},{lat},{lon});
   node["amenity"~"^(restaurant|cafe|bar)$"](around:{radius_m},{lat},{lon});
 );
-out center tags;
+out geom tags;
 """
 
 
@@ -136,12 +136,39 @@ def _tag_amenity_category(tags: dict) -> str | None:
     return None
 
 
-def _element_center(el: dict) -> tuple[float, float] | None:
+def _element_min_dist(el: dict, qlat: float, qlon: float) -> float | None:
+    """
+    True straight-line distance to the NEAREST POINT of this element.
+    For nodes: distance to the node itself.
+    For ways:  minimum distance across all geometry nodes — critical for long
+               roads (e.g. a highway bridge 5 ft away whose way-center is 2 km
+               away would otherwise be reported at 2 km, not 5 ft).
+    """
     if el.get("type") == "node":
-        return el.get("lat"), el.get("lon")
-    c = el.get("center", {})
-    if c:
-        return c.get("lat"), c.get("lon")
+        lat, lon = el.get("lat"), el.get("lon")
+        if lat is not None and lon is not None:
+            return _haversine_m(qlat, qlon, lat, lon)
+        return None
+
+    # Way with full geometry (out geom tags)
+    geometry = el.get("geometry") or []
+    if geometry:
+        min_d = None
+        for pt in geometry:
+            lat, lon = pt.get("lat"), pt.get("lon")
+            if lat is None or lon is None:
+                continue
+            d = _haversine_m(qlat, qlon, lat, lon)
+            if min_d is None or d < min_d:
+                min_d = d
+        if min_d is not None:
+            return min_d
+
+    # Fallback: center (older cached responses may still have this)
+    c = el.get("center") or {}
+    lat, lon = c.get("lat"), c.get("lon")
+    if lat is not None and lon is not None:
+        return _haversine_m(qlat, qlon, lat, lon)
     return None
 
 
@@ -161,13 +188,9 @@ def _parse_all(elements: list[dict], qlat: float, qlon: float):
     amen:  dict = {}
 
     for el in elements:
-        tags   = el.get("tags") or {}
-        coords = _element_center(el)
-        if not (coords and coords[0] is not None and coords[1] is not None):
-            continue
-        try:
-            dist = _haversine_m(qlat, qlon, coords[0], coords[1])
-        except Exception:
+        tags = el.get("tags") or {}
+        dist = _element_min_dist(el, qlat, qlon)
+        if dist is None:
             continue
 
         haz = _tag_hazard_category(tags)
