@@ -233,26 +233,47 @@ def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
             f"{total_fac} EPA facilities nearby, no Tier-1 hazards (source: EPA ECHO)")
 
     # ── Infrastructure risk ────────────────────────────────
-    near = osm.get("within_300m", {}) or {}
-    far  = osm.get("within_1000m", {}) or {}
+    near       = osm.get("within_300m",  {}) or {}
+    far        = osm.get("within_1000m", {}) or {}
+    major_roads= osm.get("major_roads",  {}) or {}
+    amenities  = osm.get("amenities",    {}) or {}
+
+    # Major roads — most impactful traffic/noise source
+    road_class_label = {"motorway": "Interstate/motorway", "trunk": "US highway",
+                        "primary": "Primary road (US/state route)", "secondary": "Secondary road"}
+    for cls in ["motorway", "trunk", "primary", "secondary"]:
+        rd = major_roads.get(cls, {})
+        if rd.get("count", 0) > 0:
+            nm   = rd.get("nearest_m")
+            names = ", ".join(rd.get("names", [])[:3]) or cls
+            dist_txt = f"{int(nm)}m" if nm else "within 2km"
+            ev["infrastructure_risk"].append(
+                f"{road_class_label.get(cls, cls)}: {names} at {dist_txt} (source: OpenStreetMap)")
 
     for cat, label in [("railway", "Railway"), ("power_line", "Power line"),
-                       ("highway", "Highway"), ("industrial", "Industrial zone"),
-                       ("landfill", "Landfill")]:
+                       ("industrial", "Industrial zone"), ("landfill", "Landfill")]:
         d = near.get(cat) or far.get(cat)
         if d and d.get("count", 0) > 0:
             nm = d.get("nearest_m")
-            dist_txt = f"at {int(nm)}m" if nm else "within 1km"
             ev["infrastructure_risk"].append(
-                f"{label} {dist_txt} (source: OpenStreetMap)")
-        elif cat == "railway":
-            ev["infrastructure_risk"].append("No railway within 1km (source: OpenStreetMap)")
+                f"{label} {'at ' + str(int(nm)) + 'm' if nm else 'within 1km'} (source: OpenStreetMap)")
 
-    noise   = osm.get("noise_score",  0)
-    hazard  = osm.get("hazard_score", 0)
-    if noise > 0 or hazard > 0:
-        ev["infrastructure_risk"].append(
-            f"Noise score {noise}/100, hazard score {hazard}/100 (source: OpenStreetMap)")
+    if not major_roads and not any((near.get(c) or far.get(c) or {}).get("count") for c in ["railway","highway"]):
+        ev["infrastructure_risk"].append("No major roads or railway within 1km (source: OpenStreetMap)")
+
+    noise  = osm.get("noise_score",  0)
+    hazard = osm.get("hazard_score", 0)
+    ev["infrastructure_risk"].append(
+        f"Noise score {noise}/100, hazard score {hazard}/100 (source: OpenStreetMap)")
+
+    # Amenities → livability
+    for cat, label in [("school","School"), ("park","Park"), ("transit_stop","Transit stop"),
+                       ("grocery","Grocery store"), ("healthcare","Healthcare")]:
+        a = amenities.get(cat, {})
+        if a.get("count", 0) > 0:
+            nm = a.get("nearest_m")
+            ev["livability"].append(
+                f"{label} {'at ' + str(int(nm)) + 'm' if nm else 'nearby'} (source: OpenStreetMap)")
 
     # ── Neighborhood stability ─────────────────────────────
     income = census.get("median_household_income")
@@ -429,7 +450,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v3:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v4:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:

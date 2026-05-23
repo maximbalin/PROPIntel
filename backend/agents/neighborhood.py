@@ -19,11 +19,13 @@ def get_llm():
 
 async def neighborhood_agent(state: dict) -> dict:
     raw_data = state.get("raw_data", {})
+    osm = raw_data.get("osm", {}) or {}
     prompt = NEIGHBORHOOD_AGENT_PROMPT.format(
         address=state.get("address", ""),
         lat=state.get("lat", 0),
         lon=state.get("lon", 0),
         census_data=json.dumps(raw_data.get("census", {})),
+        amenities_data=json.dumps(osm.get("amenities", {})),
     )
     try:
         llm = get_llm()
