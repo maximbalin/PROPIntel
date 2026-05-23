@@ -5,7 +5,11 @@ import math
 
 logger = logging.getLogger(__name__)
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+]
 HEADERS = {"User-Agent": "PropIntel/1.0 (propintel@example.com)"}
 
 # Single query radius — distance filtering done in Python from computed centers
@@ -81,21 +85,21 @@ out geom tags qt;
 
 
 async def _fetch_overpass(query: str) -> list[dict]:
-    """Fetch with up to 2 retries and exponential backoff."""
-    for attempt in range(3):
-        if attempt:
-            await asyncio.sleep(2 ** attempt)
-        try:
-            async with httpx.AsyncClient(timeout=70.0) as client:
-                resp = await client.post(OVERPASS_URL, data={"data": query}, headers=HEADERS)
-                resp.raise_for_status()
-                data = resp.json()
-                elements = data.get("elements", [])
-                logger.info(f"OSM: {len(elements)} elements returned (attempt {attempt + 1})")
-                return elements
-        except Exception as e:
-            logger.warning(f"Overpass attempt {attempt + 1}/3 failed: {e}")
-    logger.error("OSM: all 3 Overpass attempts failed — returning empty")
+    """Try each Overpass mirror in order; retry primary once on failure."""
+    for mirror in OVERPASS_MIRRORS:
+        for attempt in range(2):
+            if attempt:
+                await asyncio.sleep(3)
+            try:
+                async with httpx.AsyncClient(timeout=65.0) as client:
+                    resp = await client.post(mirror, data={"data": query}, headers=HEADERS)
+                    resp.raise_for_status()
+                    elements = resp.json().get("elements", [])
+                    logger.info(f"OSM: {len(elements)} elements from {mirror}")
+                    return elements
+            except Exception as e:
+                logger.warning(f"Overpass {mirror} attempt {attempt + 1} failed: {e}")
+    logger.error("OSM: all Overpass mirrors failed — returning empty")
     return []
 
 

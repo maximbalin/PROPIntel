@@ -4,7 +4,6 @@ import logging
 import time
 import httpx
 from backend.cache import get_redis
-from backend.config import get_settings
 from backend.data.fema import get_flood_data
 from backend.data.epa import get_epa_facilities
 from backend.data.osm import get_infrastructure, _compute_scores
@@ -111,28 +110,24 @@ class FreeDataFetcher:
                            for cls in ("motorway", "trunk", "primary", "secondary"))
 
         if not has_any_road:
-            settings = get_settings()
-            gmaps_key = settings.google_maps_api_key
-            if gmaps_key:
-                try:
-                    from backend.data.google_roads import get_nearby_roads_google
-                    google_roads = await get_nearby_roads_google(lat, lon, gmaps_key)
-                    if google_roads:
-                        # Merge into OSM result; recompute noise/hazard scores
-                        merged_roads = {**major_roads, **google_roads}
-                        near  = osm_result.get("within_300m",  {}) or {}
-                        far   = osm_result.get("within_1000m", {}) or {}
-                        scores = _compute_scores(near, far, merged_roads)
-                        osm_result = {
-                            **osm_result,
-                            "major_roads":  merged_roads,
-                            "noise_score":  scores["noise_score"],
-                            "hazard_score": scores["hazard_score"],
-                            "road_source":  "Google Maps Geocoding API",
-                        }
-                        logger.info(f"Google Roads merged: {list(google_roads.keys())}")
-                except Exception as e:
-                    logger.warning(f"Google Roads fallback failed: {e}")
+            try:
+                from backend.data.osm_nominatim import get_nearby_roads_nominatim
+                nominatim_roads = await get_nearby_roads_nominatim(lat, lon)
+                if nominatim_roads:
+                    merged_roads = {**major_roads, **nominatim_roads}
+                    near   = osm_result.get("within_300m",  {}) or {}
+                    far    = osm_result.get("within_1000m", {}) or {}
+                    scores = _compute_scores(near, far, merged_roads)
+                    osm_result = {
+                        **osm_result,
+                        "major_roads":  merged_roads,
+                        "noise_score":  scores["noise_score"],
+                        "hazard_score": scores["hazard_score"],
+                        "road_source":  "OpenStreetMap Nominatim (Overpass fallback)",
+                    }
+                    logger.info(f"Nominatim fallback merged: {list(nominatim_roads.keys())}")
+            except Exception as e:
+                logger.warning(f"Nominatim fallback failed: {e}")
 
         crash_result = safe(remaining[4])
         traffic_data = enrich_traffic_data(
