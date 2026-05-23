@@ -347,6 +347,55 @@ body {
 .footer-label   { font-weight: 600; color: var(--text-sub); }
 .footer-disclaimer { font-size: 0.75rem; color: var(--muted-light); }
 
+/* ── Property listing card ───────────────────────────────── */
+.listing-card {
+  border-radius: var(--radius); border: 1.5px solid #e2e8f0;
+  background: #fff; margin-bottom: 1.25rem;
+  box-shadow: var(--shadow); overflow: hidden;
+}
+.listing-card.hidden { display: none; }
+.listing-inner { display: flex; gap: 0; }
+.listing-photo-strip {
+  flex-shrink: 0; width: 220px; max-height: 180px;
+  overflow: hidden; background: #f1f5f9;
+}
+.listing-photo-strip img {
+  width: 100%; height: 100%; object-fit: cover; display: block;
+}
+.listing-photo-placeholder {
+  width: 100%; height: 100%; display: flex; align-items: center;
+  justify-content: center; font-size: 2.5rem; color: #94a3b8;
+}
+.listing-details {
+  flex: 1; padding: 1.1rem 1.4rem; display: flex;
+  flex-direction: column; gap: 0.5rem;
+}
+.listing-source-badge {
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted);
+  display: flex; align-items: center; gap: 0.4rem;
+}
+.listing-price {
+  font-size: 1.6rem; font-weight: 800; color: var(--text);
+  line-height: 1;
+}
+.listing-specs {
+  display: flex; gap: 1.2rem; flex-wrap: wrap;
+  font-size: 0.875rem; color: var(--text-sub);
+}
+.listing-spec { display: flex; align-items: center; gap: 0.3rem; }
+.listing-spec-icon { font-size: 0.95rem; }
+.listing-link {
+  margin-top: auto; display: inline-block;
+  font-size: 0.8125rem; font-weight: 600;
+  color: var(--accent); text-decoration: none;
+}
+.listing-link:hover { text-decoration: underline; }
+@media (max-width: 600px) {
+  .listing-inner { flex-direction: column; }
+  .listing-photo-strip { width: 100%; height: 160px; }
+}
+
 /* ── Decision banner ─────────────────────────────────────── */
 .decision-banner {
   border-radius: var(--radius); padding: 1.25rem 1.5rem;

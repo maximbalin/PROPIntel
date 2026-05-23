@@ -70,6 +70,7 @@ function renderResults(data) {
   document.getElementById('resultMode').textContent = data.mode.toUpperCase();
   document.getElementById('confidenceValue').textContent = `${data.overall_confidence}%`;
 
+  renderListingData(data.listing_data);
   renderDecision(data.recommendation);
   renderSatelliteMap(data.lat, data.lon, data.address);
   renderRadar(data.scores);
@@ -98,6 +99,46 @@ function renderResults(data) {
   document.getElementById('sourcesList').textContent =
     (data.data_sources || []).join(', ') || 'FEMA · EPA · OSM · Census · USGS';
   showResults();
+}
+
+// ── Property listing card ─────────────────────────────────
+
+function renderListingData(listing) {
+  const card = document.getElementById('listingCard');
+  if (!listing || listing.error || (!listing.price && !listing.beds && !listing.sqft)) {
+    card.classList.add('hidden');
+    return;
+  }
+
+  const photoHtml = (listing.photos && listing.photos.length)
+    ? `<img src="${listing.photos[0]}" alt="Property photo" loading="lazy">`
+    : `<div class="listing-photo-placeholder">🏠</div>`;
+
+  const priceHtml = listing.price
+    ? `<div class="listing-price">$${listing.price.toLocaleString()}</div>`
+    : '';
+
+  const specs = [];
+  if (listing.beds)       specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🛏</span>${listing.beds} bed${listing.beds !== 1 ? 's' : ''}</span>`);
+  if (listing.baths)      specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚿</span>${listing.baths} bath${listing.baths !== 1 ? 's' : ''}</span>`);
+  if (listing.sqft)       specs.push(`<span class="listing-spec"><span class="listing-spec-icon">📐</span>${listing.sqft.toLocaleString()} sqft</span>`);
+  if (listing.year_built) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🏗</span>Built ${listing.year_built}</span>`);
+
+  const linkHtml = listing.listing_url
+    ? `<a class="listing-link" href="${listing.listing_url}" target="_blank" rel="noopener">View on ${listing.source || 'listing site'} →</a>`
+    : '';
+
+  card.innerHTML = `
+    <div class="listing-inner">
+      <div class="listing-photo-strip">${photoHtml}</div>
+      <div class="listing-details">
+        <div class="listing-source-badge">🏠 Property Listing · ${listing.source || 'Unknown source'}</div>
+        ${priceHtml}
+        <div class="listing-specs">${specs.join('')}</div>
+        ${linkHtml}
+      </div>
+    </div>`;
+  card.classList.remove('hidden');
 }
 
 // ── Decision banner ───────────────────────────────────────

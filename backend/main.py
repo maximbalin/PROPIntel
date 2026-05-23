@@ -17,9 +17,10 @@ from backend.config import get_settings
 from backend.data.fetcher import FreeDataFetcher
 from backend.database import close_pool, get_pool, run_migrations
 from backend.agents.graph import get_graph
+from backend.data.listing import get_listing_data
 from backend.models import (
     AnalyzeRequest, AnalyzeResponse, ScoreSet, ScoreBreakdown, RiskItem,
-    ScoreEvidence, Recommendation, PriceContext, NearbyRisk, HiddenCost,
+    ScoreEvidence, Recommendation, PriceContext, NearbyRisk, HiddenCost, ListingData,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -629,7 +630,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v8:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v9:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
@@ -668,7 +669,15 @@ async def analyze(req: AnalyzeRequest):
         "hidden_costs": None,
     }
 
-    final_state = await graph.ainvoke(initial_state)
+    import asyncio as _asyncio
+    final_state, listing_raw = await _asyncio.gather(
+        graph.ainvoke(initial_state),
+        get_listing_data(req.address, lat, lon),
+        return_exceptions=True,
+    )
+    if isinstance(final_state, Exception):
+        raise final_state
+    listing_raw = listing_raw if not isinstance(listing_raw, Exception) else {"error": str(listing_raw)}
 
     scores_dict = final_state.get("scores", {})
     score_set = ScoreSet(
@@ -725,24 +734,30 @@ async def analyze(req: AnalyzeRequest):
                 timeline=r.get("timeline"),
             ))
 
-    # Merge deterministic risks — add any road/hazard class not already covered by LLM
+    # Merge deterministic risks — only skip if LLM explicitly covered the *same* road class
     det_risks = _build_deterministic_risk_items(raw_data)
-    llm_categories = {r.category for r in risks}
-    _traffic_keywords = {"traffic", "highway", "road", "noise", "motorway", "trunk", "primary"}
-    _flood_keywords   = {"flood"}
-    _epa_keywords     = {"epa", "tier", "hazard", "superfund", "pollution"}
+    llm_cats_lower = {r.category.lower() for r in risks}
 
-    def _covered(det_cat: str, llm_cats: set[str]) -> bool:
-        words = set(det_cat.lower().split("_"))
-        for llm_cat in llm_cats:
-            llm_words = set(llm_cat.lower().split("_"))
-            if words & llm_words & (_traffic_keywords | _flood_keywords | _epa_keywords):
-                return True
-        return False
+    _road_classes = {"motorway", "trunk", "primary", "secondary", "tertiary"}
+    llm_road_classes = {cls for cls in _road_classes if any(cls in c for c in llm_cats_lower)}
+    llm_has_flood = any("flood" in c for c in llm_cats_lower)
+    llm_has_epa   = any(kw in c for c in llm_cats_lower for kw in ("epa", "pollution", "superfund", "tier"))
 
     for dr in det_risks:
-        if not _covered(dr.category, llm_categories):
-            risks.append(dr)
+        cat = dr.category.lower()
+        if cat.startswith("traffic_"):
+            # "traffic_{cls}_road" — skip only if LLM named this exact road class
+            parts = cat.split("_")
+            cls = parts[1] if len(parts) >= 2 else ""
+            if cls in llm_road_classes:
+                continue
+        elif "flood" in cat:
+            if llm_has_flood:
+                continue
+        elif "epa" in cat or "tier" in cat or "superfund" in cat:
+            if llm_has_epa:
+                continue
+        risks.append(dr)
 
     data_sources = list({
         src
@@ -757,6 +772,21 @@ async def analyze(req: AnalyzeRequest):
 
     assessment_id = str(uuid.uuid4())
 
+    listing_data = None
+    if isinstance(listing_raw, dict) and not listing_raw.get("error"):
+        listing_data = ListingData(
+            price      =listing_raw.get("price"),
+            beds       =listing_raw.get("beds"),
+            baths      =listing_raw.get("baths"),
+            sqft       =listing_raw.get("sqft"),
+            year_built =listing_raw.get("year_built"),
+            listing_url=listing_raw.get("listing_url"),
+            photos     =listing_raw.get("photos", []),
+            source     =listing_raw.get("source"),
+        )
+    elif isinstance(listing_raw, dict) and listing_raw.get("error"):
+        listing_data = ListingData(error=listing_raw["error"])
+
     response = AnalyzeResponse(
         assessment_id=assessment_id,
         address=req.address,
@@ -770,6 +800,7 @@ async def analyze(req: AnalyzeRequest):
         price_context=price_context,
         nearby_risks=nearby_risks,
         hidden_costs=hidden_costs,
+        listing_data=listing_data,
         risks=risks,
         narrative=final_state.get("narrative", ""),
         mode_advice=final_state.get("mode_advice", ""),

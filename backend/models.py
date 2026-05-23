@@ -73,6 +73,18 @@ class NearbyRisk(BaseModel):
     bearing_deg:    Optional[float] = None
 
 
+class ListingData(BaseModel):
+    price:       Optional[int]   = None
+    beds:        Optional[int]   = None
+    baths:       Optional[float] = None
+    sqft:        Optional[int]   = None
+    year_built:  Optional[int]   = None
+    listing_url: Optional[str]   = None
+    photos:      List[str]       = []
+    source:      Optional[str]   = None
+    error:       Optional[str]   = None
+
+
 class HiddenCost(BaseModel):
     name:             str
     category:         str            # insurance / utility / service / maintenance / tax
@@ -95,6 +107,7 @@ class AnalyzeResponse(BaseModel):
     price_context:      Optional[PriceContext]   = None
     nearby_risks:       List[NearbyRisk]         = []
     hidden_costs:       List[HiddenCost]         = []
+    listing_data:       Optional["ListingData"]  = None
     risks:              List[RiskItem]
     narrative:          str
     mode_advice:        str
