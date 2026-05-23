@@ -81,12 +81,15 @@ class FreeDataFetcher:
             logger.info(f"Cache hit for {cache_key}")
             return json.loads(cached)
 
-        results = await asyncio.gather(
-            get_flood_data(lat, lon),
+        # Fetch FEMA first so BFE can be passed to USGS elevation
+        fema_result = await get_flood_data(lat, lon)
+        bfe_feet = fema_result.get("bfe_feet") if not isinstance(fema_result, Exception) else None
+
+        remaining = await asyncio.gather(
             get_epa_facilities(lat, lon),
             get_infrastructure(lat, lon),
             get_demographics(lat, lon),
-            get_elevation(lat, lon),
+            get_elevation(lat, lon, bfe_feet=bfe_feet),
             return_exceptions=True,
         )
 
@@ -94,11 +97,11 @@ class FreeDataFetcher:
             return r if not isinstance(r, Exception) else {"error": str(r)}
 
         data = {
-            "fema": safe(results[0]),
-            "epa": safe(results[1]),
-            "osm": safe(results[2]),
-            "census": safe(results[3]),
-            "usgs": safe(results[4]),
+            "fema":   safe(fema_result),
+            "epa":    safe(remaining[0]),
+            "osm":    safe(remaining[1]),
+            "census": safe(remaining[2]),
+            "usgs":   safe(remaining[3]),
         }
 
         await redis.setex(cache_key, 48 * 3600, json.dumps(data))

@@ -16,7 +16,12 @@ Raw data provided:
   top_facilities list each with: name, distance_miles, tier (1=worst/2/3),
   superfund, hazardous_waste, toxic_releases, air_violations, water_violations,
   violation_count, penalty_count, total_penalties_usd
-- Elevation: {elevation_data}
+- Elevation (USGS): {elevation_data}
+  Key fields: elevation_meters, elevation_feet, terrain_type (bowl/flat/slope/ridge),
+  slope_meters (max elevation delta across 150m grid), property_is_low_point (True = water collects here),
+  elevation_score (0-100, pre-computed), bfe_feet (FEMA BFE passed through for cross-reference),
+  bfe_margin_feet (elevation_feet minus bfe_feet — negative means below flood level),
+  grid_samples (dict of 8 surrounding elevations in meters)
 
 Your task:
 1. Analyze the environmental risks for this property
@@ -25,7 +30,13 @@ Your task:
    - If sfha=true: mandatory flood insurance is required — always flag this
    - If bfe_available=true: cite the BFE in feet in your evidence
    - If firm_panel_age_years > 15: flag the FIRM panel as potentially outdated
-3. For EPA pollution risk — use tier + distance together:
+3. For elevation/terrain risk — use terrain_type + bfe_margin_feet together:
+   - terrain_type=bowl AND property_is_low_point=true → high drainage/flood risk
+   - bfe_margin_feet < 0 → property is below flood level — critical
+   - bfe_margin_feet 0–3 → property barely above flood level — high
+   - terrain_type=ridge OR bfe_margin_feet > 10 → low elevation risk
+   - Cite elevation_feet and bfe_margin_feet directly in evidence
+4. For EPA pollution risk — use tier + distance together:
    - tier1 within 1.5 miles → always high or critical severity
    - tier2 within 0.5 miles → high severity
    - Cite facility name, distance, and violation/penalty counts as evidence
