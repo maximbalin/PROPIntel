@@ -72,10 +72,9 @@ function renderResults(data) {
 
   renderListingData(data.listing_data);
   renderDecision(data.recommendation);
-  renderSatelliteMap(data.lat, data.lon, data.address);
+  renderRiskMap(data.lat, data.lon, data.address, data.nearby_risks || []);
   renderRadar(data.scores);
   renderScores(data.scores, data.score_evidence);
-  renderNearbyRisks(data.nearby_risks || []);
   renderHiddenCosts(data.hidden_costs || []);
   renderPriceContext(data.price_context);
 
@@ -157,45 +156,112 @@ function renderDecision(rec) {
     .map(f => `<li>${f}</li>`).join('');
 }
 
-// ── Satellite map ─────────────────────────────────────────
+// ── Property Risk Map (street map + risk markers) ─────────
 
-function renderSatelliteMap(lat, lon, address) {
-  // Destroy previous instance
+const _SEV_COLOR = {
+  critical: '#7c3aed',
+  high:     '#dc2626',
+  medium:   '#ea580c',
+  low:      '#16a34a',
+};
+const _CAT_ICON = {
+  traffic:       '🚗',
+  infrastructure:'🏭',
+  flood:         '💧',
+  environmental: '☣️',
+  epa:           '☣️',
+  noise:         '🔊',
+};
+
+function _offsetLatLon(lat, lon, distM, bearingDeg) {
+  const R = 6371000;
+  const b = bearingDeg * Math.PI / 180;
+  const dLat = (distM * Math.cos(b)) / R * (180 / Math.PI);
+  const dLon = (distM * Math.sin(b)) / (R * Math.cos(lat * Math.PI / 180)) * (180 / Math.PI);
+  return [lat + dLat, lon + dLon];
+}
+
+function renderRiskMap(lat, lon, address, risks) {
   if (leafletMap) { leafletMap.remove(); leafletMap = null; }
 
-  leafletMap = L.map('satelliteMap', { zoomControl: true, scrollWheelZoom: false })
-    .setView([lat, lon], 15);
+  leafletMap = L.map('riskMap', { zoomControl: true, scrollWheelZoom: false })
+    .setView([lat, lon], 14);
 
-  // Esri World Imagery — free satellite tiles, no API key required
-  L.tileLayer(
-    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    { attribution: 'Tiles © Esri — Source: Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN', maxZoom: 19 }
-  ).addTo(leafletMap);
-
-  // Property marker
-  const icon = L.divIcon({
-    html: '<div style="background:#1e3a5f;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">📍</div>',
-    iconSize: [28, 28], iconAnchor: [14, 14], className: '',
-  });
-  L.marker([lat, lon], { icon })
-    .addTo(leafletMap)
-    .bindPopup(`<strong>${address}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
-
-  // 0.5 mile radius circle (804.67m)
-  L.circle([lat, lon], {
-    radius: 804.67,
-    color: '#f59e0b', weight: 2, opacity: 0.8,
-    fillColor: '#f59e0b', fillOpacity: 0.06,
+  // OpenStreetMap street tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19,
   }).addTo(leafletMap);
 
-  // Listing links in sidebar
+  // Distance rings
+  L.circle([lat, lon], {
+    radius: 300, color: '#ea580c', weight: 1.5, opacity: 0.8,
+    fillColor: '#ea580c', fillOpacity: 0.04, dashArray: '5 5',
+  }).addTo(leafletMap).bindPopup('<b>300 m radius</b>');
+
+  L.circle([lat, lon], {
+    radius: 1000, color: '#f59e0b', weight: 1.5, opacity: 0.6,
+    fillColor: '#f59e0b', fillOpacity: 0.02, dashArray: '5 5',
+  }).addTo(leafletMap).bindPopup('<b>1 km radius</b>');
+
+  // Property marker
+  const homeIcon = L.divIcon({
+    html: '<div style="background:#1e3a5f;border:2px solid #fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,.45)">🏠</div>',
+    iconSize: [34, 34], iconAnchor: [17, 17], className: '',
+  });
+  L.marker([lat, lon], { icon: homeIcon, zIndexOffset: 1000 })
+    .addTo(leafletMap)
+    .bindPopup(`<strong>${address}</strong><br><span style="font-size:0.8em;color:#6b7280">${lat.toFixed(5)}, ${lon.toFixed(5)}</span>`);
+
+  // Risk markers — golden-angle distribution for risks without a known bearing
+  const GOLDEN = 137.508;
+  let bIdx = 0;
+  risks.forEach(risk => {
+    const bearing = (risk.bearing_deg != null) ? risk.bearing_deg : (bIdx++ * GOLDEN) % 360;
+    const dist    = risk.distance_m || 600;
+    const [rLat, rLon] = _offsetLatLon(lat, lon, dist, bearing);
+    const color   = _SEV_COLOR[risk.severity] || '#6b7280';
+    const emoji   = _CAT_ICON[(risk.category || '').toLowerCase()] || '⚠️';
+
+    const rIcon = L.divIcon({
+      html: `<div style="background:${color};border:2px solid #fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:13px;box-shadow:0 1px 6px rgba(0,0,0,.4)">${emoji}</div>`,
+      iconSize: [28, 28], iconAnchor: [14, 14], className: '',
+    });
+
+    L.marker([rLat, rLon], { icon: rIcon })
+      .addTo(leafletMap)
+      .bindPopup(`
+        <strong>${risk.name}</strong><br>
+        <span style="font-size:0.82em;color:#6b7280">Distance: ${risk.distance_label}</span><br>
+        <span style="font-size:0.82em;font-weight:700;color:${color}">${(risk.severity || '').toUpperCase()}</span>
+      `);
+  });
+
+  // ── Right panel: risk list ───────────────────────────────
+  const panel = document.getElementById('riskPanelList');
+  if (!risks || risks.length === 0) {
+    panel.innerHTML = '<div class="risk-panel-empty">No significant risks detected nearby.</div>';
+  } else {
+    panel.innerHTML = risks.map(r => {
+      const color = _SEV_COLOR[r.severity] || '#6b7280';
+      const emoji = _CAT_ICON[(r.category || '').toLowerCase()] || '⚠️';
+      return `<div class="risk-panel-item">
+        <span class="risk-panel-icon">${emoji}</span>
+        <div class="risk-panel-info">
+          <div class="risk-panel-name" title="${r.name}">${r.name}</div>
+          <div class="risk-panel-dist">${r.distance_label}</div>
+        </div>
+        <span class="risk-sev-badge" style="background:${color}20;color:${color};border-color:${color}55">${r.severity}</span>
+      </div>`;
+    }).join('');
+  }
+
+  // External map links
   const enc = encodeURIComponent(address);
-  const linksEl = document.getElementById('mapLinks');
-  linksEl.innerHTML = [
-    { label: '🏠 Realtor.com', url: `https://www.realtor.com/realestateandhomes-search/${enc}` },
-    { label: '🟢 Zillow',      url: `https://www.zillow.com/homes/${enc}_rb/` },
-    { label: '🔵 Redfin',      url: `https://www.redfin.com/stingray/do/location-autocomplete?location=${enc}` },
+  document.getElementById('riskMapLinks').innerHTML = [
     { label: '🗺 Google Maps', url: `https://www.google.com/maps/search/${enc}` },
+    { label: '🏠 Zillow',      url: `https://www.zillow.com/homes/${enc}_rb/` },
+    { label: '🔵 Redfin',      url: `https://www.redfin.com/stingray/do/location-autocomplete?location=${enc}` },
   ].map(l => `<a class="map-link-btn" href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`).join('');
 }
 
@@ -299,103 +365,6 @@ function animateScore(key, target) {
     if (progress < 1) requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
-}
-
-// ── Nearby risks ring ─────────────────────────────────────
-
-const SEV_COLOR = { critical: '#7c3aed', high: '#dc2626', medium: '#ea580c', low: '#f59e0b' };
-
-function renderNearbyRisks(risks) {
-  const card = document.getElementById('nearbyCard');
-  const legend = document.getElementById('ringLegend');
-  if (!risks || risks.length === 0) { card.style.display = 'none'; return; }
-  card.style.display = '';
-
-  drawRingCanvas(risks);
-
-  legend.innerHTML = risks.map(r => `
-    <div class="ring-legend-item">
-      <span class="ring-dot ring-dot-${r.severity}"></span>
-      <span>
-        <span class="ring-item-name">${r.name}</span>
-        <span class="ring-item-dist"> — ${r.distance_label}</span>
-      </span>
-    </div>`).join('');
-}
-
-function drawRingCanvas(risks) {
-  const canvas = document.getElementById('ringCanvas');
-  const ctx = canvas.getContext('2d');
-  const W = canvas.width, H = canvas.height;
-  const cx = W / 2, cy = H / 2;
-  ctx.clearRect(0, 0, W, H);
-
-  // 3 rings: 300m, 1km, 3mi radius in canvas px
-  const rings = [
-    { label: '300m',  r: 55,  color: 'rgba(220,38,38,.08)' },
-    { label: '1km',   r: 100, color: 'rgba(234,88,12,.06)' },
-    { label: '3 mi',  r: 140, color: 'rgba(245,158,11,.05)' },
-  ];
-
-  rings.forEach(ring => {
-    ctx.beginPath();
-    ctx.arc(cx, cy, ring.r, 0, Math.PI * 2);
-    ctx.fillStyle = ring.color;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = '#9ca3af';
-    ctx.font = '10px Inter';
-    ctx.textAlign = 'left';
-    ctx.fillText(ring.label, cx + ring.r + 4, cy + 4);
-  });
-
-  // Property dot at center
-  ctx.beginPath();
-  ctx.arc(cx, cy, 7, 0, Math.PI * 2);
-  ctx.fillStyle = '#1e3a5f';
-  ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 9px Inter';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('P', cx, cy);
-
-  // Place risk dots around rings
-  const maxDistM = 5000;
-  const maxR = 140;
-
-  // Group risks without a bearing — spread them evenly by angle
-  const noBearing = risks.filter(r => r.bearing_deg == null);
-  const hasBearing = risks.filter(r => r.bearing_deg != null);
-  const angleStep = noBearing.length > 0 ? (360 / noBearing.length) : 0;
-
-  [...hasBearing, ...noBearing].forEach((risk, i) => {
-    const distM = risk.distance_m ?? 800;
-    const ratio = Math.min(distM / maxDistM, 1);
-    const rPx = 18 + ratio * (maxR - 18);
-
-    let angleDeg;
-    if (risk.bearing_deg != null) {
-      angleDeg = risk.bearing_deg - 90; // chart.js convention: 0=right
-    } else {
-      angleDeg = i * angleStep - 90;
-    }
-    const rad = angleDeg * Math.PI / 180;
-    const x = cx + rPx * Math.cos(rad);
-    const y = cy + rPx * Math.sin(rad);
-
-    ctx.beginPath();
-    ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = SEV_COLOR[risk.severity] || '#9ca3af';
-    ctx.fill();
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-  });
-
-  ctx.textBaseline = 'alphabetic';
 }
 
 // ── Hidden costs ──────────────────────────────────────────

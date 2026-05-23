@@ -118,26 +118,26 @@
         <div class="scores-col" id="scoresGrid"></div>
       </div>
 
-      <!-- Satellite map -->
-      <div class="map-card">
-        <div class="map-header">
-          <div class="card-label" style="margin:0"><span class="label-icon">🛰</span> Satellite View — 0.5 mi radius</div>
-        </div>
-        <div class="map-body">
-          <div id="satelliteMap" class="satellite-map"></div>
-          <div class="map-sidebar">
-            <div class="map-sidebar-title">View on</div>
-            <div class="map-links" id="mapLinks"></div>
+      <!-- Property Risk Map: street map + all nearby risk markers -->
+      <div class="risk-map-card">
+        <div class="risk-map-header">
+          <div class="card-label"><span class="label-icon">📍</span> Property Risk Map</div>
+          <div class="risk-map-legend-row">
+            <span class="rml-swatch" style="background:#7c3aed"></span><span class="rml-label">Critical</span>
+            <span class="rml-swatch" style="background:#dc2626"></span><span class="rml-label">High</span>
+            <span class="rml-swatch" style="background:#ea580c"></span><span class="rml-label">Medium</span>
+            <span class="rml-swatch" style="background:#16a34a"></span><span class="rml-label">Low</span>
+            <span class="rml-ring-label">── 300m ── 1km</span>
           </div>
         </div>
-      </div>
-
-      <!-- Nearby risks ring -->
-      <div class="nearby-card" id="nearbyCard">
-        <div class="card-label"><span class="label-icon">📡</span> Nearby Risks by Distance</div>
-        <div class="ring-layout">
-          <canvas id="ringCanvas" width="300" height="300"></canvas>
-          <div class="ring-legend" id="ringLegend"></div>
+        <div class="risk-map-body">
+          <div id="riskMap" class="risk-map-leaflet"></div>
+          <div class="risk-map-panel">
+            <div class="risk-panel-title">Nearby Risks</div>
+            <div id="riskPanelList" class="risk-panel-list"></div>
+            <div class="risk-panel-title" style="margin-top:1rem">View on</div>
+            <div id="riskMapLinks" class="map-links"></div>
+          </div>
         </div>
       </div>
 
