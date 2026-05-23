@@ -4,9 +4,10 @@ import logging
 import time
 import httpx
 from backend.cache import get_redis
+from backend.config import get_settings
 from backend.data.fema import get_flood_data
 from backend.data.epa import get_epa_facilities
-from backend.data.osm import get_infrastructure
+from backend.data.osm import get_infrastructure, _compute_scores
 from backend.data.census import get_demographics
 from backend.data.usgs import get_elevation
 from backend.data.traffic import get_crash_data, enrich_traffic_data
@@ -74,13 +75,15 @@ class FreeDataFetcher:
                 return None
             return float(results[0]["lat"]), float(results[0]["lon"])
 
-    async def fetch_all(self, lat: float, lon: float) -> dict:
+    async def fetch_all(self, lat: float, lon: float, force_refresh: bool = False) -> dict:
         cache_key = f"raw:v6:{lat:.4f}:{lon:.4f}"
         redis = await get_redis()
-        cached = await redis.get(cache_key)
-        if cached:
-            logger.info(f"Cache hit for {cache_key}")
-            return json.loads(cached)
+
+        if not force_refresh:
+            cached = await redis.get(cache_key)
+            if cached:
+                logger.info(f"Cache hit for {cache_key}")
+                return json.loads(cached)
 
         # Fetch FEMA first so BFE can be passed to USGS elevation
         fema_result = await get_flood_data(lat, lon)
@@ -98,7 +101,39 @@ class FreeDataFetcher:
         def safe(r):
             return r if not isinstance(r, Exception) else {"error": str(r)}
 
-        osm_result   = safe(remaining[1])
+        osm_result = safe(remaining[1])
+
+        # ── Google Maps Roads fallback ─────────────────────────
+        # If Overpass returned no road data at all, use Google Geocoding API
+        # to reverse-geocode sample points and detect nearby major roads.
+        major_roads = osm_result.get("major_roads") or {}
+        has_any_road = any(major_roads.get(cls, {}).get("count", 0) > 0
+                           for cls in ("motorway", "trunk", "primary", "secondary"))
+
+        if not has_any_road:
+            settings = get_settings()
+            gmaps_key = settings.google_maps_api_key
+            if gmaps_key:
+                try:
+                    from backend.data.google_roads import get_nearby_roads_google
+                    google_roads = await get_nearby_roads_google(lat, lon, gmaps_key)
+                    if google_roads:
+                        # Merge into OSM result; recompute noise/hazard scores
+                        merged_roads = {**major_roads, **google_roads}
+                        near  = osm_result.get("within_300m",  {}) or {}
+                        far   = osm_result.get("within_1000m", {}) or {}
+                        scores = _compute_scores(near, far, merged_roads)
+                        osm_result = {
+                            **osm_result,
+                            "major_roads":  merged_roads,
+                            "noise_score":  scores["noise_score"],
+                            "hazard_score": scores["hazard_score"],
+                            "road_source":  "Google Maps Geocoding API",
+                        }
+                        logger.info(f"Google Roads merged: {list(google_roads.keys())}")
+                except Exception as e:
+                    logger.warning(f"Google Roads fallback failed: {e}")
+
         crash_result = safe(remaining[4])
         traffic_data = enrich_traffic_data(
             crash_result,

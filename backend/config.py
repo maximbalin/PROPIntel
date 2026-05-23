@@ -5,6 +5,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     openai_api_key: str = ""
     census_api_key: str = ""
+    google_maps_api_key: str = ""
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/propintel"
     redis_url: str = "redis://localhost:6379"
     llm_model: str = "gpt-4o"

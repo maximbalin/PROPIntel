@@ -5,7 +5,7 @@ import math
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -626,15 +626,42 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
     return sorted(costs, key=lambda c: lik_order.get(c.likelihood, 9))
 
 
+@app.post("/api/flush")
+async def flush_cache(address: str = Query(..., description="Full property address to clear")):
+    """Delete all cached raw data and assessments for an address so the next
+    analyze call fetches fresh data from all sources."""
+    redis = await get_redis()
+    fetcher = FreeDataFetcher()
+    try:
+        lat, lon = await fetcher.geocode(address)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Address not found")
+
+    raw_key  = f"raw:v6:{lat:.4f}:{lon:.4f}"
+    ass_keys = [
+        f"assessment:v10:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
+        for mode in ("buyer", "investor")
+    ]
+    deleted = 0
+    for key in [raw_key] + ass_keys:
+        deleted += await redis.delete(key)
+
+    return {"address": address, "lat": lat, "lon": lon, "keys_deleted": deleted}
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
-async def analyze(req: AnalyzeRequest):
+async def analyze(
+    req: AnalyzeRequest,
+    force_refresh: bool = Query(False, description="Bypass cache and fetch fresh data"),
+):
     settings = get_settings()
 
     cache_key = f"assessment:v10:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
-    cached = await redis.get(cache_key)
-    if cached:
-        return AnalyzeResponse(**json.loads(cached))
+    if not force_refresh:
+        cached = await redis.get(cache_key)
+        if cached:
+            return AnalyzeResponse(**json.loads(cached))
 
     fetcher = FreeDataFetcher()
     if req.lat is not None and req.lon is not None:
@@ -645,7 +672,7 @@ async def analyze(req: AnalyzeRequest):
         except ValueError:
             raise HTTPException(status_code=422, detail="Address not found")
 
-    raw_data = await fetcher.fetch_all(lat, lon)
+    raw_data = await fetcher.fetch_all(lat, lon, force_refresh=force_refresh)
 
     graph = get_graph()
     initial_state = {
