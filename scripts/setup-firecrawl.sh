@@ -19,74 +19,148 @@ echo ""
 
 # ── 1. Clone Firecrawl source ──────────────────────────────────
 if [ -d "$FIRECRAWL_DIR/.git" ]; then
-  echo "[1/4] Firecrawl already cloned at ./firecrawl — pulling latest..."
+  echo "[1/5] Firecrawl already cloned at ./firecrawl — pulling latest..."
   git -C "$FIRECRAWL_DIR" pull --ff-only || true
 else
-  echo "[1/4] Cloning Firecrawl (shallow clone, ~30 seconds)..."
+  echo "[1/5] Cloning Firecrawl (shallow clone, ~30 seconds)..."
   git clone --depth=1 https://github.com/mendableai/firecrawl.git "$FIRECRAWL_DIR"
   echo "      Cloned to ./firecrawl"
 fi
 echo ""
 
-# ── 2. Patch Dockerfiles for SSL proxy environments ────────────
-# WSL and corporate networks often have SSL inspection proxies that present
-# self-signed certificates, breaking curl/npm/pnpm downloads inside Docker.
-# Patches applied:
-#   playwright: ENV NODE_TLS_REJECT_UNAUTHORIZED=0 before chromium install
-#   api:        curl -k flag on rustup download + Node.js/npm SSL bypass envs
-echo "[2/4] Patching Dockerfiles for SSL proxy compatibility..."
+# ── 2. Extract corporate SSL proxy CA certificate ──────────────
+# WSL and corporate networks use SSL inspection proxies that present
+# self-signed certs, breaking HTTPS inside Docker containers.
+# We extract the root CA cert from the proxy and inject it into the
+# Docker build context so ALL tools (curl, rustup, npm, pnpm) trust it.
+echo "[2/5] Checking for SSL proxy CA certificate..."
 
-PLAYWRIGHT_DF="$FIRECRAWL_DIR/apps/playwright-service-ts/Dockerfile"
-if [ -f "$PLAYWRIGHT_DF" ]; then
-  if grep -q "NODE_TLS_REJECT_UNAUTHORIZED" "$PLAYWRIGHT_DF"; then
-    echo "      Playwright Dockerfile already patched — skipping"
-  else
-    sed -i '/RUN npx playwright install/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0' "$PLAYWRIGHT_DF"
-    echo "      Playwright: disabled TLS verification for Chromium download"
-  fi
-else
-  echo "      Warning: Playwright Dockerfile not found — skipping"
+CA_CERT_FILE="$PROJECT_DIR/proxy-ca.crt"
+NEED_CA=false
+
+# Quick probe: does the proxy present a non-standard cert for a well-known host?
+if openssl s_client -connect sh.rustup.rs:443 -showcerts 2>/dev/null </dev/null \
+     | openssl verify 2>&1 | grep -q "self.signed\|unable to get"; then
+  NEED_CA=true
 fi
 
-API_DF="$FIRECRAWL_DIR/apps/api/Dockerfile"
-if [ -f "$API_DF" ]; then
-  if grep -q "curl.real" "$API_DF"; then
-    echo "      API Dockerfile already patched — skipping"
-  else
-    # Replace the curl binary with a wrapper that always passes --insecure.
-    # This covers ALL callers: the outer curl, rustup's inner curl calls,
-    # pnpm, and any other tool that shells out to curl — regardless of
-    # whether they pass -q or other flags that suppress .curlrc.
-    python3 - "$API_DF" << 'PYEOF'
-import sys, re
+if [ "$NEED_CA" = true ]; then
+  echo "      SSL proxy detected — extracting root CA certificate..."
+  openssl s_client -connect sh.rustup.rs:443 -showcerts 2>/dev/null </dev/null \
+    | awk '/-----BEGIN CERTIFICATE-----/{c=""} {c=c"\n"$0} /-----END CERTIFICATE-----/{last=c} END{print last}' \
+    | sed '/^$/d' \
+    > "$CA_CERT_FILE"
 
-path = sys.argv[1]
-content = open(path).read()
-
-# Remove previous partial patches that didn't fully work
-content = content.replace("RUN echo 'insecure' > /root/.curlrc\n", "")
-
-wrapper = """# WSL/corporate SSL proxy fix — replace curl binary with insecure wrapper
-# This intercepts ALL curl calls (including from rustup and pnpm) so they
-# skip SSL certificate verification regardless of what arguments they pass.
-RUN cp /usr/bin/curl /usr/bin/curl.real \\
-    && echo '#!/bin/sh' > /usr/bin/curl \\
-    && echo 'exec /usr/bin/curl.real --insecure "$@"' >> /usr/bin/curl \\
-    && chmod +x /usr/bin/curl
-"""
-
-content = re.sub(r'(RUN curl[^\n]*sh\.rustup\.rs)', wrapper + r'\1', content)
-open(path, 'w').write(content)
-print("      API: curl binary wrapped to always pass --insecure")
-PYEOF
+  if [ ! -s "$CA_CERT_FILE" ]; then
+    # Fallback: use system CA bundle (may already contain the proxy cert if IT configured WSL)
+    echo "      openssl extraction empty — using system CA bundle as fallback"
+    cp /etc/ssl/certs/ca-certificates.crt "$CA_CERT_FILE"
   fi
+  echo "      Saved proxy CA to ./proxy-ca.crt"
 else
-  echo "      Warning: API Dockerfile not found — skipping"
+  echo "      No SSL proxy detected — skipping CA extraction"
 fi
 echo ""
 
-# ── 3. Patch .env ──────────────────────────────────────────────
-echo "[3/4] Configuring .env..."
+# ── 3. Patch Dockerfiles ───────────────────────────────────────
+echo "[3/5] Patching Firecrawl Dockerfiles..."
+
+python3 - "$FIRECRAWL_DIR" "$CA_CERT_FILE" << 'PYEOF'
+import sys, re, os, shutil
+
+firecrawl_dir = sys.argv[1]
+ca_cert_file  = sys.argv[2]
+has_ca = os.path.isfile(ca_cert_file) and os.path.getsize(ca_cert_file) > 0
+
+# ── API Dockerfile ──────────────────────────────────────────────
+api_df = os.path.join(firecrawl_dir, "apps", "api", "Dockerfile")
+if os.path.isfile(api_df):
+  content = open(api_df).read()
+  changed = False
+
+  # Remove any previous broken patches we may have applied
+  content = re.sub(
+      r'\n*# (Trust corporate|WSL/corporate)[^\n]*\n(COPY proxy-ca\.crt[^\n]*\n|ENV [^\n]*\n|RUN (?:update-ca-certificates|cp /usr/bin/curl|echo)[^\n]*\n|\s+&&[^\n]*\n)*',
+      '\n', content)
+
+  if has_ca:
+    # Copy cert into API build context
+    shutil.copy(ca_cert_file, os.path.join(firecrawl_dir, "apps", "api", "proxy-ca.crt"))
+
+    ca_block = (
+        "\n# Trust corporate SSL proxy CA (WSL/corporate network)\n"
+        "COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt\n"
+        "RUN update-ca-certificates\n"
+        "ENV RUSTUP_DIST_SERVER=https://static.rust-lang.org\n"
+        "ENV CARGO_HTTP_CAINFO=/etc/ssl/certs/ca-certificates.crt\n"
+        "ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt\n"
+        "ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt\n"
+    )
+
+    if "proxy-ca.crt" not in content:
+      # Insert after first FROM line so it applies to the first build stage
+      content = re.sub(r'(^FROM [^\n]+\n)', r'\1' + ca_block, content, count=1, flags=re.MULTILINE)
+      changed = True
+      print("      API: injected proxy CA certificate trust")
+    else:
+      print("      API Dockerfile already has CA injection — skipping")
+  else:
+    if "proxy-ca.crt" not in content:
+      print("      API: no SSL proxy — no CA patch needed")
+
+  if changed:
+    open(api_df, "w").write(content)
+else:
+  print("      Warning: API Dockerfile not found — skipping")
+
+# ── Playwright Dockerfile ───────────────────────────────────────
+pw_df = os.path.join(firecrawl_dir, "apps", "playwright-service-ts", "Dockerfile")
+if os.path.isfile(pw_df):
+  content = open(pw_df).read()
+  changed = False
+
+  # Remove any previous broken patches
+  content = re.sub(
+      r'\n*# (Trust corporate|WSL/corporate)[^\n]*\n(COPY proxy-ca\.crt[^\n]*\n|ENV [^\n]*\n|RUN (?:update-ca-certificates|cp /usr/bin/curl|echo)[^\n]*\n|\s+&&[^\n]*\n)*',
+      '\n', content)
+  content = re.sub(r'\nENV NODE_TLS_REJECT_UNAUTHORIZED=0\n', '\n', content)
+
+  if has_ca:
+    shutil.copy(ca_cert_file, os.path.join(firecrawl_dir, "apps", "playwright-service-ts", "proxy-ca.crt"))
+
+    ca_block = (
+        "\n# Trust corporate SSL proxy CA (WSL/corporate network)\n"
+        "COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt\n"
+        "RUN update-ca-certificates\n"
+        "ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt\n"
+        "ENV NODE_TLS_REJECT_UNAUTHORIZED=0\n"
+    )
+
+    if "proxy-ca.crt" not in content:
+      content = re.sub(r'(^FROM [^\n]+\n)', r'\1' + ca_block, content, count=1, flags=re.MULTILINE)
+      changed = True
+      print("      Playwright: injected proxy CA certificate trust")
+    else:
+      print("      Playwright Dockerfile already has CA injection — skipping")
+  else:
+    # No CA file, just disable TLS verification for Node (playwright install)
+    if "NODE_TLS_REJECT_UNAUTHORIZED" not in content:
+      content = re.sub(
+          r'(RUN npx playwright install)',
+          'ENV NODE_TLS_REJECT_UNAUTHORIZED=0\n\\1',
+          content)
+      changed = True
+      print("      Playwright: disabled TLS verification for Chromium download")
+
+  if changed:
+    open(pw_df, "w").write(content)
+else:
+  print("      Warning: Playwright Dockerfile not found — skipping")
+PYEOF
+echo ""
+
+# ── 4. Configure .env ──────────────────────────────────────────
+echo "[4/5] Configuring .env..."
 
 if [ ! -f "$ENV_FILE" ]; then
   cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
@@ -111,8 +185,8 @@ if grep -q "^FIRECRAWL_API_KEY=fc-" "$ENV_FILE"; then
 fi
 echo ""
 
-# ── 4. Check prerequisites ─────────────────────────────────────
-echo "[4/4] Checking prerequisites..."
+# ── 5. Check prerequisites ─────────────────────────────────────
+echo "[5/5] Checking prerequisites..."
 
 OK=true
 
