@@ -11,4 +11,3 @@ pydantic
 pydantic-settings
 jinja2
 python-dotenv
-firecrawl-py
