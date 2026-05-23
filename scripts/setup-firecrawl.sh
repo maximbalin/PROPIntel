@@ -50,15 +50,15 @@ fi
 
 API_DF="$FIRECRAWL_DIR/apps/api/Dockerfile"
 if [ -f "$API_DF" ]; then
-  if grep -q "\-k --proto" "$API_DF"; then
+  if grep -q "root/.curlrc" "$API_DF"; then
     echo "      API Dockerfile already patched — skipping"
   else
-    # Add -k (insecure) to every curl command in the Dockerfile
-    sed -i "s|curl --proto|curl -k --proto|g" "$API_DF"
-    # Add Node.js + npm/pnpm SSL bypass before the rustup curl line
-    sed -i "/RUN curl -k --proto.*sh.rustup.rs/i ENV NPM_CONFIG_STRICT_SSL=false" "$API_DF"
-    sed -i "/RUN curl -k --proto.*sh.rustup.rs/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0" "$API_DF"
-    echo "      API: curl -k flag added + Node.js/npm SSL bypass set"
+    # Write insecure to /root/.curlrc so ALL curl calls in this build stage
+    # (including internal ones inside the rustup shell script) skip SSL verification.
+    sed -i "/RUN curl.*sh.rustup.rs/i RUN echo 'insecure' > /root/.curlrc" "$API_DF"
+    # Node.js / pnpm SSL bypass for npm package downloads
+    sed -i "/RUN curl.*sh.rustup.rs/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0 NPM_CONFIG_STRICT_SSL=false" "$API_DF"
+    echo "      API: /root/.curlrc insecure + Node.js/npm SSL bypass set"
   fi
 else
   echo "      Warning: API Dockerfile not found — skipping"
