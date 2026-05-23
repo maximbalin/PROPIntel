@@ -89,24 +89,38 @@ async def _firecrawl(address: str) -> dict | None:
 # ── Redfin direct scraper ──────────────────────────────────────
 
 async def _fetch_redfin(address: str) -> dict | None:
-    async with httpx.AsyncClient(timeout=20.0, headers=_REDFIN_HEADERS) as client:
+    async with httpx.AsyncClient(timeout=20.0, headers=_REDFIN_HEADERS,
+                                 follow_redirects=True) as client:
         # Step 1: resolve address → property ID
-        ac = await client.get(
-            "https://www.redfin.com/stingray/do/query-location-autocomplete",
-            params={"al": 1, "location": address, "start": 0, "count": 5, "v": 2},
-        )
-        ac.raise_for_status()
-        data = json.loads(ac.text.lstrip("{}&&").strip())
-
+        # Try the newer search-autocomplete-v2 endpoint first; stingray autocomplete often 403s
         prop_id = url_path = None
-        for section in data.get("payload", {}).get("sections", []):
-            for row in section.get("rows", []):
-                if str(row.get("type")) == "1":
-                    prop_id  = (row.get("id") or {}).get("tableId")
-                    url_path = row.get("url", "")
+        for ac_url, ac_params in [
+            (
+                "https://www.redfin.com/stingray/api/gis/legacySearchV2",
+                {"al": 1, "market": "usmarket", "q": address, "num_entries": 5, "start": 0, "v": 2},
+            ),
+            (
+                "https://www.redfin.com/stingray/do/query-location-autocomplete",
+                {"al": 1, "location": address, "start": 0, "count": 5, "v": 2},
+            ),
+        ]:
+            try:
+                ac = await client.get(ac_url, params=ac_params)
+                if ac.status_code != 200:
+                    continue
+                data = json.loads(ac.text.lstrip("{}&&").strip())
+                for section in data.get("payload", {}).get("sections", []):
+                    for row in section.get("rows", []):
+                        if str(row.get("type")) == "1":
+                            prop_id  = (row.get("id") or {}).get("tableId")
+                            url_path = row.get("url", "")
+                            break
+                    if prop_id:
+                        break
+                if prop_id:
                     break
-            if prop_id:
-                break
+            except Exception as e:
+                logger.debug(f"Redfin autocomplete attempt failed: {e}")
 
         if not prop_id:
             return None
@@ -257,51 +271,64 @@ def _extract_redfin(above: dict, below: dict, url_path: str) -> dict | None:
 
 # ── Zillow direct scraper ──────────────────────────────────────
 
+def _zillow_url_candidates(address: str) -> list[str]:
+    """Build Zillow property URL candidates directly from address, no autocomplete needed."""
+    import re
+    # "20 Pine St, Natick, MA 01760" → "20-Pine-St-Natick-MA-01760"
+    slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+    return [
+        f"https://www.zillow.com/homes/{slug}_rb/",
+        f"https://www.zillow.com/homes/{slug}/",
+    ]
+
+
 async def _fetch_zillow(address: str) -> dict | None:
     async with httpx.AsyncClient(
         timeout=20.0, follow_redirects=True, headers=_ZILLOW_HEADERS
     ) as client:
-        # Try multiple autocomplete endpoints — Zillow rotates them
-        suggestions = []
-        for ac_url, ac_params in [
-            (
-                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                {"q": address, "clientId": "homepage-render"},
-            ),
-            (
-                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                {"q": address, "abKey": "placeholder", "clientId": "homepage-render"},
-            ),
-            (
-                "https://www.zillow.com/autocomplete/v3/suggestions",
-                {"q": address, "clientId": "homepage-render"},
-            ),
-        ]:
+        # Build URL directly — Zillow's autocomplete API frequently returns 400
+        full_url = None
+        for candidate in _zillow_url_candidates(address):
             try:
-                ac = await client.get(ac_url, params=ac_params)
-                if ac.status_code == 200:
-                    suggestions = ac.json().get("results", [])
-                    if suggestions:
-                        break
+                page = await client.get(candidate)
+                if page.status_code == 200 and "__NEXT_DATA__" in page.text:
+                    full_url = str(page.url)
+                    break
             except Exception:
                 continue
 
-        if not suggestions:
+        if not full_url:
+            # Fallback: autocomplete
+            for ac_url, ac_params in [
+                ("https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                 {"q": address, "clientId": "homepage-render"}),
+                ("https://www.zillow.com/autocomplete/v3/suggestions",
+                 {"q": address, "clientId": "homepage-render"}),
+            ]:
+                try:
+                    ac = await client.get(ac_url, params=ac_params)
+                    if ac.status_code == 200:
+                        suggestions = ac.json().get("results", [])
+                        if suggestions:
+                            home = next(
+                                (s for s in suggestions if s.get("resultType") == "Property"),
+                                suggestions[0],
+                            )
+                            detail_url = (
+                                home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
+                            )
+                            if detail_url:
+                                full_url = (
+                                    f"https://www.zillow.com{detail_url}"
+                                    if detail_url.startswith("/") else detail_url
+                                )
+                                break
+                except Exception:
+                    continue
+
+        if not full_url:
             return None
 
-        home = next(
-            (s for s in suggestions if s.get("resultType") == "Property"),
-            suggestions[0],
-        )
-        detail_url = home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
-        if not detail_url:
-            return None
-
-        full_url = (
-            f"https://www.zillow.com{detail_url}"
-            if detail_url.startswith("/")
-            else detail_url
-        )
         page = await client.get(full_url)
         page.raise_for_status()
 

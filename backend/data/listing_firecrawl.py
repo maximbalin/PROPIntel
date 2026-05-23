@@ -242,57 +242,15 @@ async def _try_realtor(address: str, endpoint: str, api_key: str) -> dict | None
 
 
 async def _try_zillow(address: str, endpoint: str, api_key: str) -> dict | None:
-    """Find the Zillow listing URL via autocomplete, then extract with Firecrawl."""
+    """Find the Zillow listing URL (direct URL first, autocomplete fallback), then extract with Firecrawl."""
+    import re
     _ua = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
     )
-    listing_url = None
-    try:
-        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": _ua}) as client:
-            suggestions = []
-            for ac_url, ac_params in [
-                (
-                    "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                    {"q": address, "clientId": "homepage-render"},
-                ),
-                (
-                    "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                    {"q": address, "abKey": "placeholder", "clientId": "homepage-render"},
-                ),
-                (
-                    "https://www.zillow.com/autocomplete/v3/suggestions",
-                    {"q": address, "clientId": "homepage-render"},
-                ),
-            ]:
-                try:
-                    resp = await client.get(ac_url, params=ac_params)
-                    if resp.status_code == 200:
-                        suggestions = resp.json().get("results", [])
-                        if suggestions:
-                            break
-                except Exception:
-                    continue
-
-            if not suggestions:
-                return None
-
-            home = next(
-                (s for s in suggestions if s.get("resultType") == "Property"),
-                suggestions[0],
-            )
-            detail_url = home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
-            if not detail_url:
-                return None
-
-            listing_url = (
-                f"https://www.zillow.com{detail_url}"
-                if detail_url.startswith("/")
-                else detail_url
-            )
-    except Exception as e:
-        logger.debug(f"Zillow autocomplete failed: {e}")
-        return None
+    # Build URL directly — no autocomplete API needed
+    slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+    listing_url = f"https://www.zillow.com/homes/{slug}_rb/"
 
     prompt = (
         f"Extract the property listing details for '{address}' from this Zillow page. "
