@@ -132,14 +132,40 @@ def _build_nearby_risks(raw_data: dict, prop_lat: float, prop_lon: float) -> lis
             bearing_deg=bearing,
         ))
 
-    # OSM infrastructure by distance
+    # OSM named major roads (uses per-class breakdown with road names)
     osm = raw_data.get("osm", {})
     near = osm.get("within_300m", {})
     far  = osm.get("within_1000m", {})
+    major_roads = osm.get("major_roads", {}) or {}
+
+    road_class_meta = {
+        "motorway": ("Interstate",     lambda d: "high"   if d < 500  else ("medium" if d < 1500 else "low")),
+        "trunk":    ("US Highway",     lambda d: "high"   if d < 400  else ("medium" if d < 1200 else "low")),
+        "primary":  ("Primary Road",   lambda d: "high"   if d < 300  else ("medium" if d < 800  else "low")),
+        "secondary":("Secondary Road", lambda d: "medium" if d < 200  else "low"),
+    }
+    for cls, (label, sev_fn) in road_class_meta.items():
+        rd = major_roads.get(cls, {})
+        if rd.get("count", 0) == 0:
+            continue
+        nm = rd.get("nearest_m")
+        if nm is None:
+            continue
+        dist_m = float(nm)
+        names = rd.get("names", [])
+        name_str = names[0] if names else label
+        risks.append(NearbyRisk(
+            name=f"{label}: {name_str}",
+            category="traffic",
+            distance_label=f"{int(dist_m)}m",
+            severity=sev_fn(dist_m),
+            distance_m=dist_m,
+        ))
+
+    # OSM hazard categories (non-road)
     cat_names = {
         "railway":      "Railway",
         "power_line":   "Power Line",
-        "highway":      "Highway",
         "industrial":   "Industrial Zone",
         "landfill":     "Landfill",
         "substation":   "Electrical Substation",
@@ -478,7 +504,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v5:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v6:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
