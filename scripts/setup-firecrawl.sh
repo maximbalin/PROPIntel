@@ -89,6 +89,7 @@ if os.path.isfile(api_df):
 
     ca_block = (
         "\n# Trust corporate SSL proxy CA (WSL/corporate network)\n"
+        "RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*\n"
         "COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt\n"
         "RUN update-ca-certificates\n"
         "ENV RUSTUP_DIST_SERVER=https://static.rust-lang.org\n"
@@ -130,6 +131,7 @@ if os.path.isfile(pw_df):
 
     ca_block = (
         "\n# Trust corporate SSL proxy CA (WSL/corporate network)\n"
+        "RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*\n"
         "COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt\n"
         "RUN update-ca-certificates\n"
         "ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt\n"
