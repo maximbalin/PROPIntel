@@ -179,8 +179,156 @@ def _build_nearby_risks(raw_data: dict, prop_lat: float, prop_lon: float) -> lis
     return sorted(risks, key=lambda r: (sev_order.get(r.severity, 9), r.distance_m or 9999))
 
 
+def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
+    """
+    Build per-score evidence bullets directly from fetcher raw_data.
+    LLM evidence is used only when it provides MORE bullets than we can derive.
+    This ensures evidence is always present regardless of LLM output.
+    """
+    ev: dict[str, list[str]] = {k: [] for k in
+        ["livability", "environmental_exposure", "infrastructure_risk",
+         "neighborhood_stability", "hidden_risk"]}
+
+    fema  = raw_data.get("fema",   {}) or {}
+    epa   = raw_data.get("epa",    {}) or {}
+    osm   = raw_data.get("osm",    {}) or {}
+    usgs  = raw_data.get("usgs",   {}) or {}
+    census= raw_data.get("census", {}) or {}
+
+    # ── Environmental exposure ────────────────────────────
+    zone = fema.get("flood_zone", "")
+    risk = fema.get("risk_level", "unknown")
+    if fema.get("flood_zone_confirmed"):
+        if fema.get("sfha"):
+            ev["environmental_exposure"].append(
+                f"FEMA Zone {zone} — SFHA, mandatory flood insurance (source: OpenFEMA NFHL)")
+        else:
+            ev["environmental_exposure"].append(
+                f"FEMA Zone {zone} — {risk} flood risk (source: OpenFEMA NFHL)")
+    else:
+        ev["environmental_exposure"].append("No FEMA flood zone data for this location")
+
+    bfe_margin = usgs.get("bfe_margin_feet")
+    if bfe_margin is not None:
+        if bfe_margin < 0:
+            ev["environmental_exposure"].append(
+                f"Property is {abs(bfe_margin):.1f}ft BELOW base flood elevation (source: USGS/FEMA)")
+        elif bfe_margin < 3:
+            ev["environmental_exposure"].append(
+                f"Only {bfe_margin:.1f}ft above base flood elevation — minimal margin (source: USGS/FEMA)")
+        else:
+            ev["environmental_exposure"].append(
+                f"{bfe_margin:.1f}ft above base flood elevation (source: USGS/FEMA)")
+
+    t1 = epa.get("tier1_count", 0)
+    total_fac = epa.get("facility_count_total", 0)
+    if total_fac == 0:
+        ev["environmental_exposure"].append(
+            "No EPA-regulated facilities within 3 miles (source: EPA ECHO)")
+    elif t1 > 0:
+        ev["environmental_exposure"].append(
+            f"{t1} Tier-1 EPA hazardous site(s) within 3 miles (source: EPA ECHO)")
+    else:
+        ev["environmental_exposure"].append(
+            f"{total_fac} EPA facilities nearby, no Tier-1 hazards (source: EPA ECHO)")
+
+    # ── Infrastructure risk ────────────────────────────────
+    near = osm.get("within_300m", {}) or {}
+    far  = osm.get("within_1000m", {}) or {}
+
+    for cat, label in [("railway", "Railway"), ("power_line", "Power line"),
+                       ("highway", "Highway"), ("industrial", "Industrial zone"),
+                       ("landfill", "Landfill")]:
+        d = near.get(cat) or far.get(cat)
+        if d and d.get("count", 0) > 0:
+            nm = d.get("nearest_m")
+            dist_txt = f"at {int(nm)}m" if nm else "within 1km"
+            ev["infrastructure_risk"].append(
+                f"{label} {dist_txt} (source: OpenStreetMap)")
+        elif cat == "railway":
+            ev["infrastructure_risk"].append("No railway within 1km (source: OpenStreetMap)")
+
+    noise   = osm.get("noise_score",  0)
+    hazard  = osm.get("hazard_score", 0)
+    if noise > 0 or hazard > 0:
+        ev["infrastructure_risk"].append(
+            f"Noise score {noise}/100, hazard score {hazard}/100 (source: OpenStreetMap)")
+
+    # ── Neighborhood stability ─────────────────────────────
+    income = census.get("median_household_income")
+    if income and income > 0:
+        diff = int((income / 74_755 - 1) * 100)
+        sign = "+" if diff >= 0 else ""
+        ev["neighborhood_stability"].append(
+            f"Median household income ${income:,} ({sign}{diff}% vs national $74,755) (source: US Census ACS 2022)")
+
+    unemp = census.get("unemployment_rate_pct")
+    if unemp is not None:
+        ev["neighborhood_stability"].append(
+            f"Unemployment {unemp:.1f}% vs national avg 4.0% (source: US Census ACS 2022)")
+
+    vacancy = census.get("vacancy_rate_pct")
+    if vacancy is not None:
+        ev["neighborhood_stability"].append(
+            f"Vacancy rate {vacancy:.1f}% vs national avg 9.2% (source: US Census ACS 2022)")
+
+    owner = census.get("owner_occupancy_pct")
+    if owner is not None:
+        ev["neighborhood_stability"].append(
+            f"Owner occupancy {owner:.1f}% vs national 64.8% (source: US Census ACS 2022)")
+
+    # ── Livability ─────────────────────────────────────────
+    elev_ft = usgs.get("elevation_feet")
+    terrain = usgs.get("terrain_type", "")
+    elev_score = usgs.get("elevation_score", 50)
+    if elev_ft:
+        ev["livability"].append(
+            f"Elevation {int(elev_ft)}ft, terrain: {terrain} (source: USGS EPQS)")
+    ev["livability"].append(
+        f"Elevation score {elev_score}/100 (source: USGS 9-point grid analysis)")
+
+    if income and income >= 74_755:
+        ev["livability"].append("Above-average income neighborhood (source: US Census)")
+    if total_fac == 0:
+        ev["livability"].append("Clean environment — no EPA facilities nearby (source: EPA ECHO)")
+    noise_ok = noise < 25
+    if noise_ok:
+        ev["livability"].append(f"Low noise environment, score {noise}/100 (source: OpenStreetMap)")
+
+    # ── Hidden risk ────────────────────────────────────────
+    if fema.get("sfha"):
+        ev["hidden_risk"].append(
+            "SFHA flood zone — mandatory flood insurance adds $700-3,200/yr (source: FEMA)")
+    else:
+        ev["hidden_risk"].append("No SFHA — flood insurance not mandatory (source: FEMA NFHL)")
+
+    if t1 > 0:
+        ev["hidden_risk"].append(
+            f"{t1} Tier-1 hazardous site(s) in area — environmental liability risk (source: EPA ECHO)")
+    else:
+        ev["hidden_risk"].append("No Tier-1 EPA hazardous sites within 3 miles (source: EPA ECHO)")
+
+    age = census.get("housing_age_years")
+    if age and age > 50:
+        ev["hidden_risk"].append(
+            f"Housing stock median age {age} yrs — potential deferred maintenance (source: US Census)")
+
+    # Merge: if LLM provided evidence for a score, prefer it (it's more contextual)
+    if llm_evidence and isinstance(llm_evidence, dict):
+        for k in ev:
+            llm_bullets = llm_evidence.get(k) or []
+            if len(llm_bullets) >= 2:
+                ev[k] = llm_bullets  # LLM wins if it gave at least 2 bullets
+
+    # Cap at 4 bullets per score
+    for k in ev:
+        ev[k] = ev[k][:4]
+
+    return ev
+
+
 def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
-    """Merge LLM-generated costs with deterministic ones derived from raw data."""
+    """Deterministic hidden costs from raw data, supplemented by LLM."""
     costs: list[HiddenCost] = []
     names_seen: set[str] = set()
 
@@ -190,48 +338,86 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
             names_seen.add(key)
             costs.append(c)
 
-    # Deterministic: FEMA SFHA → mandatory flood insurance (always confirmed)
-    fema = raw_data.get("fema", {})
-    if fema.get("sfha"):
-        zone = fema.get("flood_zone", "")
-        _add(HiddenCost(
-            name="Mandatory Flood Insurance (NFIP)",
-            category="insurance",
-            annual_low=700,
-            annual_high=3200,
-            likelihood="confirmed",
-            basis=f"SFHA Zone {zone} — federally-backed mortgages require flood insurance",
-        ))
+    fema   = raw_data.get("fema",   {}) or {}
+    epa    = raw_data.get("epa",    {}) or {}
+    osm    = raw_data.get("osm",    {}) or {}
+    usgs   = raw_data.get("usgs",   {}) or {}
+    census = raw_data.get("census", {}) or {}
 
-    # Deterministic: Tier-1 EPA within 1 mile → recommend water testing
-    epa = raw_data.get("epa", {})
+    # ── FEMA ──────────────────────────────────────────────
+    if fema.get("sfha"):
+        _add(HiddenCost(name="Mandatory Flood Insurance (NFIP)", category="insurance",
+            annual_low=700, annual_high=3200, likelihood="confirmed",
+            basis=f"SFHA Zone {fema.get('flood_zone','')} — required on all federally-backed mortgages (source: FEMA)"))
+    elif fema.get("risk_level") in ("moderate", "high"):
+        _add(HiddenCost(name="Flood Insurance (Voluntary)", category="insurance",
+            annual_low=300, annual_high=900, likelihood="likely",
+            basis=f"Flood Zone {fema.get('flood_zone','')} ({fema.get('risk_level','')}) — lenders often require it even outside SFHA (source: FEMA)"))
+
+    # Terrain bowl + low elevation → sump pump
+    if usgs.get("terrain_type") == "bowl" or usgs.get("property_is_low_point"):
+        _add(HiddenCost(name="Sump Pump Maintenance & Backup Power", category="maintenance",
+            annual_low=200, annual_high=600, likelihood="likely",
+            basis="Bowl terrain / low point — sump pump needed to prevent basement flooding (source: USGS elevation analysis)"))
+
+    # ── EPA ────────────────────────────────────────────────
     t1_close = any(
         f.get("tier") == 1 and (f.get("distance_miles") or 99) <= 1.0
-        for f in (epa.get("top_facilities") or [])
-    )
+        for f in (epa.get("top_facilities") or []))
     if t1_close:
-        _add(HiddenCost(
-            name="Annual Well/Tap Water Testing",
-            category="service",
-            annual_low=150,
-            annual_high=400,
-            likelihood="likely",
-            basis="Tier-1 EPA hazardous facility within 1 mile — independent water quality testing recommended",
-        ))
+        _add(HiddenCost(name="Annual Water Quality Testing", category="service",
+            annual_low=150, annual_high=400, likelihood="confirmed",
+            basis="Tier-1 EPA hazardous facility within 1 mile — independent testing strongly advised (source: EPA ECHO)"))
 
-    # Add LLM-generated costs (skip if already added deterministically)
+    any_fac_close = (epa.get("facility_count_half_mile") or 0) > 0
+    if any_fac_close and not t1_close:
+        _add(HiddenCost(name="Air Quality / HVAC Filter Upgrades", category="maintenance",
+            annual_low=100, annual_high=300, likelihood="possible",
+            basis="EPA-regulated facility within 0.5 miles — enhanced air filtration recommended (source: EPA ECHO)"))
+
+    # ── OSM ────────────────────────────────────────────────
+    near = osm.get("within_300m", {}) or {}
+    far  = osm.get("within_1000m", {}) or {}
+
+    landfill = near.get("landfill") or far.get("landfill")
+    if landfill and (landfill.get("count") or 0) > 0:
+        _add(HiddenCost(name="Air & Well Water Testing (Landfill)", category="service",
+            annual_low=200, annual_high=500, likelihood="likely",
+            basis=f"Landfill within {int(landfill.get('nearest_m',1000))}m — methane and leachate monitoring advised (source: OpenStreetMap)"))
+
+    # No municipal waste infrastructure found → private waste removal
+    waste_infra = (near.get("fuel_station") or {}).get("count", 0)  # weak proxy
+    pop = census.get("population", 99999)
+    if pop < 5000:  # rural / small town tract
+        _add(HiddenCost(name="Private Trash / Waste Removal", category="service",
+            annual_low=300, annual_high=700, likelihood="likely",
+            basis=f"Census tract population {pop:,} — rural/small town areas often lack municipal waste service (source: US Census ACS 2022)"))
+        _add(HiddenCost(name="Private Well Pump Maintenance & Testing", category="utility",
+            annual_low=200, annual_high=500, likelihood="likely",
+            basis="Low-density area — municipal water connection may not be available (source: US Census ACS 2022)"))
+        _add(HiddenCost(name="Septic System Pumping (amortized)", category="utility",
+            annual_low=75, annual_high=150, likelihood="likely",
+            basis="Rural tract — likely on septic system; pump every 3-5 years + annual inspection (source: US Census ACS 2022)"))
+
+    # ── Census ─────────────────────────────────────────────
+    age = census.get("housing_age_years")
+    if age and age > 50:
+        _add(HiddenCost(name="Older Housing Maintenance Reserve", category="maintenance",
+            annual_low=3000, annual_high=8000, likelihood="possible",
+            basis=f"Median housing age {age} yrs — expect higher costs for plumbing, electrical, roof (source: US Census ACS 2022)"))
+
+    # ── LLM additions ──────────────────────────────────────
     for raw in (llm_costs or []):
         if isinstance(raw, dict):
             try:
-                c = HiddenCost(
+                _add(HiddenCost(
                     name=raw.get("name", "Unknown"),
                     category=raw.get("category", "service"),
                     annual_low=raw.get("annual_low"),
                     annual_high=raw.get("annual_high"),
                     likelihood=raw.get("likelihood", "possible"),
                     basis=raw.get("basis", ""),
-                )
-                _add(c)
+                ))
             except Exception:
                 pass
 
@@ -243,7 +429,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v3:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
@@ -295,11 +481,9 @@ async def analyze(req: AnalyzeRequest):
     debug = scores_dict.get("_debug", {})
     score_breakdown = ScoreBreakdown(**{k: debug.get(k, 50) for k in ScoreBreakdown.model_fields}) if debug else None
 
-    # Score evidence from LLM
-    raw_evidence = final_state.get("score_evidence") or {}
-    score_evidence = ScoreEvidence(**{
-        k: raw_evidence.get(k, []) for k in ScoreEvidence.model_fields
-    }) if raw_evidence else None
+    # Score evidence: deterministic from raw data, LLM enhances if it provided ≥2 bullets
+    ev_dict = _build_score_evidence(raw_data, final_state.get("score_evidence"))
+    score_evidence = ScoreEvidence(**{k: ev_dict.get(k, []) for k in ScoreEvidence.model_fields})
 
     # Decision recommendation from LLM
     raw_rec = final_state.get("recommendation") or {}

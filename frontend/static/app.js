@@ -147,7 +147,7 @@ function renderSatelliteMap(lat, lon, address) {
     fillColor: '#f59e0b', fillOpacity: 0.06,
   }).addTo(leafletMap);
 
-  // External listing links
+  // Listing links in sidebar
   const enc = encodeURIComponent(address);
   const linksEl = document.getElementById('mapLinks');
   linksEl.innerHTML = [
