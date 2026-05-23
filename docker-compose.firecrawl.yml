@@ -9,17 +9,30 @@
 #   docker compose -f docker-compose.yml -f docker-compose.firecrawl.yml up --build -d
 #
 # Firecrawl API:       http://localhost:3002
-# Queue admin UI:      http://localhost:3002/admin/propintel-local/queues
 # No Firecrawl API key needed — self-hosted runs without authentication.
 
 services:
 
-  # ── RabbitMQ — required by Firecrawl's NUQ orchestration layer ─
-  firecrawl-rabbitmq:
-    image: rabbitmq:3-alpine
+  # ── NuQ-aware PostgreSQL ───────────────────────────────────────
+  # Custom image from Firecrawl source — includes the NuQ schema migrations
+  # as init scripts; a plain postgres image is missing these tables.
+  firecrawl-postgres:
+    build:
+      context: ./firecrawl/apps/nuq-postgres
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── RabbitMQ — required by Firecrawl's NuQ queue layer ────────
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-management
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,7 +80,6 @@ services:
       PLAYWRIGHT_MICROSERVICE_URL: "http://firecrawl-playwright:3000/scrape"
 
       # OpenAI key — required for JSON schema extraction
-      # Reuses PropIntel's key from your .env
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
 
       # Worker concurrency — tune for your machine
@@ -81,13 +93,20 @@ services:
       # Disable telemetry
       POSTHOG_API_KEY: ""
 
-      # NUQ module — provide URLs to prevent Docker-in-Docker spawning
-      NUQ_DATABASE_URL: "postgresql://postgres:postgres@db:5432/propintel"
-      NUQ_RABBITMQ_URL: "amqp://guest:guest@firecrawl-rabbitmq:5672"
+      # NuQ PostgreSQL — must point to the custom nuq-postgres image,
+      # NOT PropIntel's db (which lacks the nuq schema)
+      POSTGRES_HOST: firecrawl-postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+
+      # NuQ RabbitMQ
+      NUQ_RABBITMQ_URL: "amqp://firecrawl-rabbitmq:5672"
     depends_on:
       redis:
         condition: service_healthy
-      db:
+      firecrawl-postgres:
         condition: service_healthy
       firecrawl-rabbitmq:
         condition: service_healthy

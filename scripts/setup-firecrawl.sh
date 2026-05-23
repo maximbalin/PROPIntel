@@ -84,8 +84,11 @@ if os.path.isfile(api_df):
       '\n', content)
 
   if has_ca:
-    # Copy cert into API build context
+    # Copy cert into API and nuq-postgres build contexts
     shutil.copy(ca_cert_file, os.path.join(firecrawl_dir, "apps", "api", "proxy-ca.crt"))
+    nuq_pg_dir = os.path.join(firecrawl_dir, "apps", "nuq-postgres")
+    if os.path.isdir(nuq_pg_dir):
+      shutil.copy(ca_cert_file, os.path.join(nuq_pg_dir, "proxy-ca.crt"))
 
     ca_block = (
         "\n# Trust corporate SSL proxy CA (WSL/corporate network)\n"
