@@ -28,22 +28,40 @@ else
 fi
 echo ""
 
-# ── 2. Patch Playwright Dockerfile for SSL proxy environments ──
-# WSL and corporate networks often have SSL inspection proxies that cause
-# self-signed certificate errors when Playwright downloads Chromium.
-# We insert NODE_TLS_REJECT_UNAUTHORIZED=0 before the install step.
-echo "[2/4] Patching Playwright Dockerfile for SSL proxy compatibility..."
+# ── 2. Patch Dockerfiles for SSL proxy environments ────────────
+# WSL and corporate networks often have SSL inspection proxies that present
+# self-signed certificates, breaking curl/npm/pnpm downloads inside Docker.
+# Patches applied:
+#   playwright: ENV NODE_TLS_REJECT_UNAUTHORIZED=0 before chromium install
+#   api:        curl -k flag on rustup download + Node.js/npm SSL bypass envs
+echo "[2/4] Patching Dockerfiles for SSL proxy compatibility..."
+
 PLAYWRIGHT_DF="$FIRECRAWL_DIR/apps/playwright-service-ts/Dockerfile"
 if [ -f "$PLAYWRIGHT_DF" ]; then
   if grep -q "NODE_TLS_REJECT_UNAUTHORIZED" "$PLAYWRIGHT_DF"; then
-    echo "      Already patched — skipping"
+    echo "      Playwright Dockerfile already patched — skipping"
   else
-    # Insert ENV line before the playwright install line
     sed -i '/RUN npx playwright install/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0' "$PLAYWRIGHT_DF"
-    echo "      Patched: disabled TLS verification for Chromium download"
+    echo "      Playwright: disabled TLS verification for Chromium download"
   fi
 else
-  echo "      Warning: Playwright Dockerfile not found at expected path — skipping patch"
+  echo "      Warning: Playwright Dockerfile not found — skipping"
+fi
+
+API_DF="$FIRECRAWL_DIR/apps/api/Dockerfile"
+if [ -f "$API_DF" ]; then
+  if grep -q "\-k --proto" "$API_DF"; then
+    echo "      API Dockerfile already patched — skipping"
+  else
+    # Add -k (insecure) to every curl command in the Dockerfile
+    sed -i "s|curl --proto|curl -k --proto|g" "$API_DF"
+    # Add Node.js + npm/pnpm SSL bypass before the rustup curl line
+    sed -i "/RUN curl -k --proto.*sh.rustup.rs/i ENV NPM_CONFIG_STRICT_SSL=false" "$API_DF"
+    sed -i "/RUN curl -k --proto.*sh.rustup.rs/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0" "$API_DF"
+    echo "      API: curl -k flag added + Node.js/npm SSL bypass set"
+  fi
+else
+  echo "      Warning: API Dockerfile not found — skipping"
 fi
 echo ""
 
