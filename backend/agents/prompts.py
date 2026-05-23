@@ -95,6 +95,17 @@ Raw data provided:
     noise_score (0-100): pre-computed, accounts for road class and distance
     hazard_score (0-100): pre-computed, power/industrial/landfill proximity
 - Elevation: {elevation_data}
+- Traffic & Crash Data: {traffic_data}
+  aadt_estimates — per road class present within 2km:
+    estimated_aadt: annual average daily traffic (vehicles/day estimate by class)
+    nearest_m: distance to nearest road of this class
+    road_names: list of road name/refs from OSM
+    peak_hour_vehicles: vehicles in a single peak hour (commute)
+    noise_db_at_property: estimated noise level at property in dBA (distance-attenuated)
+  timeline_patterns: list of traffic pattern strings (rush hour, school zone, seasonal)
+  crash_summary: NHTSA FARS fatal/injury crashes within 0.5 mi, 2019–2023
+    total_crashes, fatal_crashes, injury_crashes
+    error: set if FARS API was unavailable (treat as no data, not zero crashes)
 
 Road severity guidelines — use major_roads data:
   motorway (Interstate): nearest_m < 500 → critical; 500-1500 → high; >1500 → medium
@@ -112,6 +123,16 @@ Road impact factors to mention in evidence:
   - Safety: pedestrian/cyclist risk near high-traffic roads
   - Air quality: vehicle emissions from motorway/trunk/primary corridors
   - Property value: proximity to busy road typically reduces value 3-10%
+  - AADT: cite vehicles/day estimate and peak-hour count when available
+
+Traffic busyness guidelines:
+  - motorway AADT 120k: extreme — noise, emissions, and safety risk day/night
+  - trunk AADT 45k: very high — noise audible at 1km, poor air quality corridor
+  - primary AADT 25k: high — continuous daytime noise, rush-hour congestion
+  - If crash_summary.total_crashes > 5 within 0.5mi: flag as elevated accident risk
+  - If crash_summary.fatal_crashes > 0: always flag with severity high or critical
+  - noise_db_at_property: cite if available; >65 dB = sleep disruption threshold
+  - timeline_patterns: always include 1-2 relevant patterns in the evidence bullets
 
 Amenity impact — report as POSITIVE signals in a separate "amenities" risk entry:
   - school nearest_m < 500 → excellent walkability for families
@@ -123,10 +144,12 @@ Amenity impact — report as POSITIVE signals in a separate "amenities" risk ent
 Your task:
 1. Analyze infrastructure risks using major_roads (primary source), within_300m, within_1000m
 2. ALWAYS check major_roads for primary/trunk/motorway — these are the most impactful risks
-3. Cite road names, distances, and road class in evidence
-4. Report amenities as a positive "neighborhood_amenities" risk entry (severity: low, positive=true)
-5. Do NOT omit major roads even if they appear far — 1km from a primary road is still relevant
-6. If a category is absent from ALL bands: do NOT mention it as a risk
+3. Cite road names, distances, road class, AADT estimate, and noise_db in evidence
+4. Report traffic timeline patterns (rush hour, school zone, seasonal) in evidence
+5. Report crash history from NHTSA FARS — cite counts; if error field present, say "FARS data unavailable"
+6. Report amenities as a positive "neighborhood_amenities" risk entry (severity: low, positive=true)
+7. Do NOT omit major roads even if they appear far — 1km from a primary road is still relevant
+8. If a category is absent from ALL bands: do NOT mention it as a risk
 
 Respond ONLY with valid JSON:
 {{
@@ -135,7 +158,7 @@ Respond ONLY with valid JSON:
       "category": "traffic_noise_primary_road",
       "severity": "high",
       "description": "Primary road (Route 9 / Worcester Rd) at 280m — major commercial corridor with heavy traffic noise and air quality impact",
-      "evidence": ["OSM: primary road 'Route 9' nearest_m=280, within 300m band", "Primary roads generate 55-70 dB at 100m — audible at property", "Air quality impact from vehicle emissions corridor"],
+      "evidence": ["OSM: primary road 'Route 9' nearest_m=280 — est. 25,000 vehicles/day, ~62 dB at property", "Peak-hour traffic: ~2,500 vehicles Mon-Fri 7-9AM and 4-7PM", "NHTSA FARS: 4 crashes within 0.5mi, 2019-2023 (0 fatal)", "Air quality impact from vehicle emissions corridor"],
       "confidence": 88,
       "timeline": "ongoing"
     }},

@@ -25,6 +25,7 @@ async def infrastructure_agent(state: dict) -> dict:
         lon=state.get("lon", 0),
         osm_data=json.dumps(raw_data.get("osm", {})),
         elevation_data=json.dumps(raw_data.get("usgs", {})),
+        traffic_data=json.dumps(raw_data.get("traffic", {})),
     )
     try:
         llm = get_llm()

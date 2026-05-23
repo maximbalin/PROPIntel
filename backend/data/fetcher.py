@@ -9,6 +9,7 @@ from backend.data.epa import get_epa_facilities
 from backend.data.osm import get_infrastructure
 from backend.data.census import get_demographics
 from backend.data.usgs import get_elevation
+from backend.data.traffic import get_crash_data, enrich_traffic_data
 
 logger = logging.getLogger(__name__)
 
@@ -90,18 +91,28 @@ class FreeDataFetcher:
             get_infrastructure(lat, lon),
             get_demographics(lat, lon),
             get_elevation(lat, lon, bfe_feet=bfe_feet),
+            get_crash_data(lat, lon),
             return_exceptions=True,
         )
 
         def safe(r):
             return r if not isinstance(r, Exception) else {"error": str(r)}
 
+        osm_result   = safe(remaining[1])
+        crash_result = safe(remaining[4])
+        traffic_data = enrich_traffic_data(
+            crash_result,
+            osm_result.get("major_roads", {}),
+            osm_result.get("amenities", {}),
+        )
+
         data = {
-            "fema":   safe(fema_result),
-            "epa":    safe(remaining[0]),
-            "osm":    safe(remaining[1]),
-            "census": safe(remaining[2]),
-            "usgs":   safe(remaining[3]),
+            "fema":    safe(fema_result),
+            "epa":     safe(remaining[0]),
+            "osm":     osm_result,
+            "census":  safe(remaining[2]),
+            "usgs":    safe(remaining[3]),
+            "traffic": traffic_data,
         }
 
         await redis.setex(cache_key, 48 * 3600, json.dumps(data))

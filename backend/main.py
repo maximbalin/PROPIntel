@@ -233,22 +233,50 @@ def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
             f"{total_fac} EPA facilities nearby, no Tier-1 hazards (source: EPA ECHO)")
 
     # ── Infrastructure risk ────────────────────────────────
-    near       = osm.get("within_300m",  {}) or {}
-    far        = osm.get("within_1000m", {}) or {}
-    major_roads= osm.get("major_roads",  {}) or {}
-    amenities  = osm.get("amenities",    {}) or {}
+    near        = osm.get("within_300m",  {}) or {}
+    far         = osm.get("within_1000m", {}) or {}
+    major_roads = osm.get("major_roads",  {}) or {}
+    amenities   = osm.get("amenities",    {}) or {}
+    traffic     = raw_data.get("traffic", {}) or {}
+    aadt_data   = traffic.get("aadt_estimates",    {}) or {}
+    crash       = traffic.get("crash_summary",     {}) or {}
+    timelines   = traffic.get("timeline_patterns", []) or []
 
-    # Major roads — most impactful traffic/noise source
+    # Major roads with AADT + noise estimates
     road_class_label = {"motorway": "Interstate/motorway", "trunk": "US highway",
                         "primary": "Primary road (US/state route)", "secondary": "Secondary road"}
     for cls in ["motorway", "trunk", "primary", "secondary"]:
         rd = major_roads.get(cls, {})
         if rd.get("count", 0) > 0:
-            nm   = rd.get("nearest_m")
-            names = ", ".join(rd.get("names", [])[:3]) or cls
+            nm    = rd.get("nearest_m")
+            names = ", ".join(rd.get("names", [])[:2]) or cls
             dist_txt = f"{int(nm)}m" if nm else "within 2km"
+            aadt_info = aadt_data.get(cls, {})
+            aadt_val  = aadt_info.get("estimated_aadt")
+            noise_db  = aadt_info.get("noise_db_at_property")
+            extra = ""
+            if aadt_val:
+                extra += f", est. {aadt_val:,} vehicles/day"
+            if noise_db:
+                extra += f", ~{noise_db} dB at property"
             ev["infrastructure_risk"].append(
-                f"{road_class_label.get(cls, cls)}: {names} at {dist_txt} (source: OpenStreetMap)")
+                f"{road_class_label.get(cls, cls)}: {names} at {dist_txt}{extra} (source: OpenStreetMap)")
+
+    # Crash history
+    if "error" not in crash and crash.get("total_crashes") is not None:
+        total   = crash["total_crashes"]
+        fatals  = crash.get("fatal_crashes", 0)
+        if total > 0:
+            fatal_txt = f" incl. {fatals} fatal" if fatals > 0 else ""
+            ev["infrastructure_risk"].append(
+                f"{total} crashes within 0.5mi, 2019–2023{fatal_txt} (source: NHTSA FARS)")
+        else:
+            ev["infrastructure_risk"].append(
+                "0 recorded crashes within 0.5mi, 2019–2023 (source: NHTSA FARS)")
+
+    # Timeline pattern (first one, most relevant)
+    if timelines:
+        ev["infrastructure_risk"].append(timelines[0])
 
     for cat, label in [("railway", "Railway"), ("power_line", "Power line"),
                        ("industrial", "Industrial zone"), ("landfill", "Landfill")]:
@@ -450,7 +478,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v4:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v5:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
