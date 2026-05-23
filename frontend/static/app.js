@@ -512,7 +512,12 @@ function formatCategory(cat) { return cat.replace(/_/g, ' ').replace(/\b\w/g, c 
 
 function showLoading()  { document.getElementById('loadingPanel').classList.remove('hidden'); }
 function hideLoading()  { document.getElementById('loadingPanel').classList.add('hidden'); }
-function showResults()  { document.getElementById('resultsPanel').classList.remove('hidden'); }
+function showResults() {
+  document.getElementById('resultsPanel').classList.remove('hidden');
+  // Leaflet can't measure its container while the panel is hidden.
+  // invalidateSize() forces a full tile reload once it becomes visible.
+  setTimeout(() => { if (leafletMap) leafletMap.invalidateSize(); }, 60);
+}
 function hideResults()  { document.getElementById('resultsPanel').classList.add('hidden'); }
 function showError(msg) {
   document.getElementById('errorMsg').textContent = msg;
