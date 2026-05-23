@@ -14,6 +14,17 @@
 
 services:
 
+  # ── RabbitMQ — required by Firecrawl's NUQ orchestration layer ─
+  firecrawl-rabbitmq:
+    image: rabbitmq:3-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   # ── Browser renderer (Playwright / Chromium) ──────────────────
   firecrawl-playwright:
     build:
@@ -70,13 +81,15 @@ services:
       # Disable telemetry
       POSTHOG_API_KEY: ""
 
-      # NUQ module needs a PostgreSQL URL — reuse PropIntel's existing db
-      # (prevents NUQ from trying to spawn Docker-in-Docker)
+      # NUQ module — provide URLs to prevent Docker-in-Docker spawning
       NUQ_DATABASE_URL: "postgresql://postgres:postgres@db:5432/propintel"
+      NUQ_RABBITMQ_URL: "amqp://guest:guest@firecrawl-rabbitmq:5672"
     depends_on:
       redis:
         condition: service_healthy
       db:
+        condition: service_healthy
+      firecrawl-rabbitmq:
         condition: service_healthy
       firecrawl-playwright:
         condition: service_healthy
