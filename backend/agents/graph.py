@@ -25,6 +25,7 @@ class PropertyState(TypedDict):
     score_evidence: Optional[dict]
     recommendation: Optional[dict]
     price_impact: Optional[dict]
+    hidden_costs: Optional[List[dict]]
 
 
 async def parallel_agents_node(state: PropertyState) -> PropertyState:

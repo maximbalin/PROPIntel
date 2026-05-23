@@ -218,7 +218,21 @@ Your tasks:
    - Railway/highway < 200m: typically -3% to -7%
    - High neighborhood stability: +2% to +5%
    - Low environmental risk: neutral to +2%
-8. If you have insufficient data, say so — never invent facts.
+8. Identify hidden/non-obvious ongoing costs a buyer would not see in the listing price.
+   These are real costs backed by the data — do NOT invent costs without a data basis.
+   Categories and typical ranges (US national averages):
+   - Flood insurance (NFIP): $700-3,200/yr if SFHA; $200-600/yr if moderate zone
+   - Private well pump maintenance + annual water testing: $200-500/yr (rural/low-density areas)
+   - Septic system pumping (amortized): $75-150/yr rural; inspection at purchase $300-500
+   - Private trash/waste removal: $300-600/yr if OSM shows no municipal waste infrastructure
+   - EPA site monitoring / well water testing: $150-400/yr if Tier-1 facility within 1 mile
+   - Flood mitigation (sump pump, backup power, elevation certificate): $300-800/yr
+   - Private road maintenance share: $200-1,000/yr if not on public road
+   - High-risk homeowner insurance surcharge: $500-2,000/yr if high env. exposure score
+   - Stormwater/drainage remediation (bowl terrain + low elevation): $500-2,000 one-time
+   Only include a cost if the data specifically supports it (e.g. SFHA=true for flood insurance).
+   Likelihood: "confirmed" = data directly proves it; "likely" = strong indirect signal; "possible" = plausible but uncertain.
+9. If you have insufficient data, say so — never invent facts.
 
 Respond ONLY with valid JSON:
 {{
@@ -246,6 +260,24 @@ Respond ONLY with valid JSON:
     "estimated_impact_pct": 2,
     "impact_drivers": ["Low flood risk (Zone X): neutral to +2% vs flood-exposed comparables", "Above-average neighborhood stability: +2% to +4%", "Minor infrastructure (substation 380m): negligible discount"]
   }},
+  "hidden_costs": [
+    {{
+      "name": "Mandatory Flood Insurance (NFIP)",
+      "category": "insurance",
+      "annual_low": 800,
+      "annual_high": 3200,
+      "likelihood": "confirmed",
+      "basis": "SFHA Zone AE requires flood insurance on federally-backed mortgages"
+    }},
+    {{
+      "name": "Private Well Maintenance & Water Testing",
+      "category": "utility",
+      "annual_low": 200,
+      "annual_high": 500,
+      "likelihood": "likely",
+      "basis": "Rural census tract — municipal water connection may not be available"
+    }}
+  ],
   "narrative": "Full causal paragraph here...",
   "mode_advice": "Mode-specific 2-3 sentence advice here...",
   "overall_confidence": 76
@@ -256,4 +288,6 @@ Rules:
 - score_evidence bullets must be SHORT (max 12 words), specific, and cite actual data values
 - Do not invent data not present in the agent reports
 - estimated_impact_pct is an integer: negative = discount vs area median, positive = premium
+- hidden_costs array may be empty [] if no data supports any hidden cost
+- Only include hidden_costs items where the data provides a clear basis
 """

@@ -1,5 +1,6 @@
 let currentMode = 'buyer';
 let radarChartInstance = null;
+let leafletMap = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.mode-pill').forEach(pill => {
@@ -70,9 +71,11 @@ function renderResults(data) {
   document.getElementById('confidenceValue').textContent = `${data.overall_confidence}%`;
 
   renderDecision(data.recommendation);
+  renderSatelliteMap(data.lat, data.lon, data.address);
   renderRadar(data.scores);
   renderScores(data.scores, data.score_evidence);
   renderNearbyRisks(data.nearby_risks || []);
+  renderHiddenCosts(data.hidden_costs || []);
   renderPriceContext(data.price_context);
 
   const bsec = document.getElementById('breakdownSection');
@@ -111,6 +114,48 @@ function renderDecision(rec) {
   const factors = document.getElementById('decisionFactors');
   factors.innerHTML = (rec.key_factors || [])
     .map(f => `<li>${f}</li>`).join('');
+}
+
+// ── Satellite map ─────────────────────────────────────────
+
+function renderSatelliteMap(lat, lon, address) {
+  // Destroy previous instance
+  if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+
+  leafletMap = L.map('satelliteMap', { zoomControl: true, scrollWheelZoom: false })
+    .setView([lat, lon], 15);
+
+  // Esri World Imagery — free satellite tiles, no API key required
+  L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles © Esri — Source: Esri, Maxar, GeoEye, Earthstar Geographics, CNES/Airbus DS, USDA, USGS, AeroGRID, IGN', maxZoom: 19 }
+  ).addTo(leafletMap);
+
+  // Property marker
+  const icon = L.divIcon({
+    html: '<div style="background:#1e3a5f;color:#fff;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.4)">📍</div>',
+    iconSize: [28, 28], iconAnchor: [14, 14], className: '',
+  });
+  L.marker([lat, lon], { icon })
+    .addTo(leafletMap)
+    .bindPopup(`<strong>${address}</strong><br>${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+
+  // 0.5 mile radius circle (804.67m)
+  L.circle([lat, lon], {
+    radius: 804.67,
+    color: '#f59e0b', weight: 2, opacity: 0.8,
+    fillColor: '#f59e0b', fillOpacity: 0.06,
+  }).addTo(leafletMap);
+
+  // External listing links
+  const enc = encodeURIComponent(address);
+  const linksEl = document.getElementById('mapLinks');
+  linksEl.innerHTML = [
+    { label: '🏠 Realtor.com', url: `https://www.realtor.com/realestateandhomes-search/${enc}` },
+    { label: '🟢 Zillow',      url: `https://www.zillow.com/homes/${enc}_rb/` },
+    { label: '🔵 Redfin',      url: `https://www.redfin.com/stingray/do/location-autocomplete?location=${enc}` },
+    { label: '🗺 Google Maps', url: `https://www.google.com/maps/search/${enc}` },
+  ].map(l => `<a class="map-link-btn" href="${l.url}" target="_blank" rel="noopener">${l.label}</a>`).join('');
 }
 
 // ── Radar chart ───────────────────────────────────────────
@@ -310,6 +355,45 @@ function drawRingCanvas(risks) {
   });
 
   ctx.textBaseline = 'alphabetic';
+}
+
+// ── Hidden costs ──────────────────────────────────────────
+
+function renderHiddenCosts(costs) {
+  const card = document.getElementById('hiddenCostsCard');
+  if (!costs || costs.length === 0) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  const body = document.getElementById('hiddenCostsBody');
+  body.innerHTML = costs.map(c => {
+    const amt = (c.annual_low && c.annual_high)
+      ? `$${c.annual_low.toLocaleString()}–$${c.annual_high.toLocaleString()}`
+      : (c.annual_low ? `~$${c.annual_low.toLocaleString()}` : '—');
+    return `<tr>
+      <td class="hc-name">${c.name}</td>
+      <td><span class="hc-cat">${c.category}</span></td>
+      <td class="hc-amount">${amt}</td>
+      <td><span class="hc-likelihood lik-${c.likelihood}">${c.likelihood}</span></td>
+      <td class="hc-basis">${c.basis}</td>
+    </tr>`;
+  }).join('');
+
+  // Total confirmed + likely range
+  const confirmed = costs.filter(c => c.likelihood === 'confirmed');
+  const likely    = costs.filter(c => c.likelihood === 'likely');
+  const toRange   = arr => arr.reduce((s, c) => [s[0] + (c.annual_low || 0), s[1] + (c.annual_high || c.annual_low || 0)], [0, 0]);
+  const [cLow, cHigh] = toRange(confirmed);
+  const [lLow, lHigh] = toRange(likely);
+  const totalLow  = cLow + lLow;
+  const totalHigh = cHigh + lHigh;
+
+  const totalEl = document.getElementById('hiddenCostsTotal');
+  if (totalLow > 0) {
+    totalEl.innerHTML = `Estimated annual hidden cost burden: <strong>$${totalLow.toLocaleString()}–$${totalHigh.toLocaleString()}/yr</strong>
+      <span style="color:var(--muted);font-size:.75rem"> (confirmed + likely items only)</span>`;
+  } else {
+    totalEl.textContent = '';
+  }
 }
 
 // ── Price context ─────────────────────────────────────────

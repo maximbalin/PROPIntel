@@ -8,6 +8,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -113,6 +115,15 @@
         <div class="scores-col" id="scoresGrid"></div>
       </div>
 
+      <!-- Satellite map -->
+      <div class="map-card">
+        <div class="map-header">
+          <div class="card-label" style="margin:0"><span class="label-icon">🛰</span> Satellite View — 0.5 mi radius</div>
+          <div class="map-links" id="mapLinks"></div>
+        </div>
+        <div id="satelliteMap" class="satellite-map"></div>
+      </div>
+
       <!-- Nearby risks ring -->
       <div class="nearby-card" id="nearbyCard">
         <div class="card-label"><span class="label-icon">📡</span> Nearby Risks by Distance</div>
@@ -120,6 +131,26 @@
           <canvas id="ringCanvas" width="300" height="300"></canvas>
           <div class="ring-legend" id="ringLegend"></div>
         </div>
+      </div>
+
+      <!-- Hidden costs -->
+      <div class="hidden-costs-card hidden" id="hiddenCostsCard">
+        <div class="card-label"><span class="label-icon">⚠️</span> Hidden &amp; Ongoing Costs</div>
+        <div class="hc-table-wrap">
+          <table class="hc-table">
+            <thead>
+              <tr>
+                <th>Cost Item</th>
+                <th>Category</th>
+                <th>Est. Annual</th>
+                <th>Likelihood</th>
+                <th>Basis</th>
+              </tr>
+            </thead>
+            <tbody id="hiddenCostsBody"></tbody>
+          </table>
+        </div>
+        <div class="hc-total" id="hiddenCostsTotal"></div>
       </div>
 
       <!-- Price context -->

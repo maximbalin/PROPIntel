@@ -57,6 +57,7 @@ async def synthesizer_node(state: dict) -> dict:
             "score_evidence":   result.get("score_evidence"),
             "recommendation":   result.get("recommendation"),
             "price_impact":     result.get("price_impact"),
+            "hidden_costs":     result.get("hidden_costs", []),
         }
     except Exception as e:
         logger.error(f"Synthesizer failed: {e}")
@@ -72,6 +73,7 @@ async def synthesizer_node(state: dict) -> dict:
             "score_evidence":   None,
             "recommendation":   None,
             "price_impact":     None,
+            "hidden_costs":     [],
         }
 
 

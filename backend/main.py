@@ -19,7 +19,7 @@ from backend.database import close_pool, get_pool, run_migrations
 from backend.agents.graph import get_graph
 from backend.models import (
     AnalyzeRequest, AnalyzeResponse, ScoreSet, ScoreBreakdown, RiskItem,
-    ScoreEvidence, Recommendation, PriceContext, NearbyRisk,
+    ScoreEvidence, Recommendation, PriceContext, NearbyRisk, HiddenCost,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -179,6 +179,66 @@ def _build_nearby_risks(raw_data: dict, prop_lat: float, prop_lon: float) -> lis
     return sorted(risks, key=lambda r: (sev_order.get(r.severity, 9), r.distance_m or 9999))
 
 
+def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
+    """Merge LLM-generated costs with deterministic ones derived from raw data."""
+    costs: list[HiddenCost] = []
+    names_seen: set[str] = set()
+
+    def _add(c: HiddenCost):
+        key = c.name.lower()
+        if key not in names_seen:
+            names_seen.add(key)
+            costs.append(c)
+
+    # Deterministic: FEMA SFHA → mandatory flood insurance (always confirmed)
+    fema = raw_data.get("fema", {})
+    if fema.get("sfha"):
+        zone = fema.get("flood_zone", "")
+        _add(HiddenCost(
+            name="Mandatory Flood Insurance (NFIP)",
+            category="insurance",
+            annual_low=700,
+            annual_high=3200,
+            likelihood="confirmed",
+            basis=f"SFHA Zone {zone} — federally-backed mortgages require flood insurance",
+        ))
+
+    # Deterministic: Tier-1 EPA within 1 mile → recommend water testing
+    epa = raw_data.get("epa", {})
+    t1_close = any(
+        f.get("tier") == 1 and (f.get("distance_miles") or 99) <= 1.0
+        for f in (epa.get("top_facilities") or [])
+    )
+    if t1_close:
+        _add(HiddenCost(
+            name="Annual Well/Tap Water Testing",
+            category="service",
+            annual_low=150,
+            annual_high=400,
+            likelihood="likely",
+            basis="Tier-1 EPA hazardous facility within 1 mile — independent water quality testing recommended",
+        ))
+
+    # Add LLM-generated costs (skip if already added deterministically)
+    for raw in (llm_costs or []):
+        if isinstance(raw, dict):
+            try:
+                c = HiddenCost(
+                    name=raw.get("name", "Unknown"),
+                    category=raw.get("category", "service"),
+                    annual_low=raw.get("annual_low"),
+                    annual_high=raw.get("annual_high"),
+                    likelihood=raw.get("likelihood", "possible"),
+                    basis=raw.get("basis", ""),
+                )
+                _add(c)
+            except Exception:
+                pass
+
+    lik_order = {"confirmed": 0, "likely": 1, "possible": 2}
+    return sorted(costs, key=lambda c: lik_order.get(c.likelihood, 9))
+
+
 @app.post("/api/analyze", response_model=AnalyzeResponse)
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
@@ -219,6 +279,7 @@ async def analyze(req: AnalyzeRequest):
         "score_evidence": None,
         "recommendation": None,
         "price_impact": None,
+        "hidden_costs": None,
     }
 
     final_state = await graph.ainvoke(initial_state)
@@ -262,6 +323,11 @@ async def analyze(req: AnalyzeRequest):
     # Nearby risks derived from raw fetcher data
     nearby_risks = _build_nearby_risks(raw_data, lat, lon)
 
+    # Hidden costs: LLM + deterministic from raw data
+    hidden_costs = _build_hidden_costs(
+        raw_data, final_state.get("hidden_costs") or []
+    )
+
     raw_risks = final_state.get("risks", []) or []
     risks = []
     for r in raw_risks:
@@ -300,6 +366,7 @@ async def analyze(req: AnalyzeRequest):
         recommendation=recommendation,
         price_context=price_context,
         nearby_risks=nearby_risks,
+        hidden_costs=hidden_costs,
         risks=risks,
         narrative=final_state.get("narrative", ""),
         mode_advice=final_state.get("mode_advice", ""),

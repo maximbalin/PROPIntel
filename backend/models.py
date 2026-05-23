@@ -73,6 +73,15 @@ class NearbyRisk(BaseModel):
     bearing_deg:    Optional[float] = None
 
 
+class HiddenCost(BaseModel):
+    name:             str
+    category:         str            # insurance / utility / service / maintenance / tax
+    annual_low:       Optional[int] = None
+    annual_high:      Optional[int] = None
+    likelihood:       str            # confirmed / likely / possible
+    basis:            str            # one-sentence explanation
+
+
 class AnalyzeResponse(BaseModel):
     assessment_id:      str
     address:            str
@@ -85,6 +94,7 @@ class AnalyzeResponse(BaseModel):
     recommendation:     Optional[Recommendation] = None
     price_context:      Optional[PriceContext]   = None
     nearby_risks:       List[NearbyRisk]         = []
+    hidden_costs:       List[HiddenCost]         = []
     risks:              List[RiskItem]
     narrative:          str
     mode_advice:        str

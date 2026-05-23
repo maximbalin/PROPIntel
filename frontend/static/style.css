@@ -432,6 +432,71 @@ body {
 .bar-amber   { background: var(--amber); }
 .bar-red     { background: var(--red); }
 
+/* ── Satellite map ───────────────────────────────────────── */
+.map-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 1.25rem;
+  box-shadow: var(--shadow-sm); overflow: hidden;
+}
+.map-header {
+  padding: 0.875rem 1.25rem; display: flex; align-items: center;
+  justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.map-links { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.map-link-btn {
+  font-size: 0.75rem; padding: 0.25rem 0.625rem;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text-sub); text-decoration: none;
+  font-family: var(--body); cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.map-link-btn:hover { border-color: var(--amber); background: var(--amber-bg); }
+.satellite-map { height: 360px; width: 100%; }
+
+/* ── Hidden costs ────────────────────────────────────────── */
+.hidden-costs-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.25rem;
+  box-shadow: var(--shadow-sm); margin-bottom: 1.25rem;
+}
+.hc-table-wrap { overflow-x: auto; margin-top: 0.875rem; }
+.hc-table {
+  width: 100%; border-collapse: collapse; font-size: 0.8125rem;
+}
+.hc-table th {
+  text-align: left; padding: 0.5rem 0.75rem;
+  font-size: 0.7rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--muted);
+  border-bottom: 2px solid var(--border); white-space: nowrap;
+}
+.hc-table td {
+  padding: 0.625rem 0.75rem; border-bottom: 1px solid var(--border-light);
+  vertical-align: top; line-height: 1.4;
+}
+.hc-table tr:last-child td { border-bottom: none; }
+.hc-table tr:hover td { background: var(--bg); }
+.hc-name { font-weight: 500; color: var(--text); }
+.hc-cat {
+  font-family: var(--mono); font-size: 0.7rem; padding: 0.15rem 0.4rem;
+  border-radius: 4px; background: var(--bg); border: 1px solid var(--border);
+  color: var(--muted); white-space: nowrap;
+}
+.hc-amount { font-family: var(--mono); color: var(--text); white-space: nowrap; }
+.hc-likelihood {
+  font-size: 0.7rem; font-weight: 600; padding: 0.2rem 0.5rem;
+  border-radius: 4px; white-space: nowrap;
+}
+.lik-confirmed { background: var(--red-bg);   color: var(--red);       border: 1px solid #fca5a5; }
+.lik-likely    { background: #fff7ed;          color: var(--orange);    border: 1px solid #fdba74; }
+.lik-possible  { background: var(--amber-bg);  color: var(--amber-dim); border: 1px solid #fde68a; }
+.hc-basis { color: var(--muted); font-size: 0.775rem; }
+.hc-total {
+  margin-top: 0.875rem; padding-top: 0.75rem; border-top: 1px solid var(--border);
+  font-size: 0.875rem; color: var(--text-sub);
+}
+.hc-total strong { font-family: var(--mono); color: var(--text); }
+
 /* ── Nearby risks ring ───────────────────────────────────── */
 .nearby-card {
   background: var(--surface); border: 1px solid var(--border);
