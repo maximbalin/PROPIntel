@@ -16,7 +16,7 @@ from backend.config import get_settings
 from backend.data.fetcher import FreeDataFetcher
 from backend.database import close_pool, get_pool, run_migrations
 from backend.agents.graph import get_graph
-from backend.models import AnalyzeRequest, AnalyzeResponse, ScoreSet, RiskItem
+from backend.models import AnalyzeRequest, AnalyzeResponse, ScoreSet, ScoreBreakdown, RiskItem
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -112,6 +112,8 @@ async def analyze(req: AnalyzeRequest):
         neighborhood_stability=scores_dict.get("neighborhood_stability", 50),
         hidden_risk=scores_dict.get("hidden_risk", 50),
     )
+    debug = scores_dict.get("_debug", {})
+    score_breakdown = ScoreBreakdown(**{k: debug.get(k, 50) for k in ScoreBreakdown.model_fields}) if debug else None
 
     raw_risks = final_state.get("risks", []) or []
     risks = []
@@ -146,6 +148,7 @@ async def analyze(req: AnalyzeRequest):
         lon=lon,
         mode=req.mode.value,
         scores=score_set,
+        score_breakdown=score_breakdown,
         risks=risks,
         narrative=final_state.get("narrative", ""),
         mode_advice=final_state.get("mode_advice", ""),

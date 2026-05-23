@@ -33,6 +33,16 @@ class ScoreSet(BaseModel):
     hidden_risk: int
 
 
+class ScoreBreakdown(BaseModel):
+    env_raw:        int
+    env_agent:      int
+    infra_raw:      int
+    infra_agent:    int
+    nbhd_raw:       int
+    nbhd_agent:     int
+    elevation_score: int
+
+
 class AnalyzeResponse(BaseModel):
     assessment_id: str
     address: str
@@ -40,6 +50,7 @@ class AnalyzeResponse(BaseModel):
     lon: float
     mode: str
     scores: ScoreSet
+    score_breakdown: Optional[ScoreBreakdown] = None
     risks: List[RiskItem]
     narrative: str
     mode_advice: str

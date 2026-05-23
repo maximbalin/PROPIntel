@@ -6,99 +6,140 @@
   <title>PropIntel — AI Property Intelligence</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+
   <header class="header">
     <div class="header-inner">
-      <div class="wordmark">
-        <span class="wordmark-prop">PROP</span><span class="wordmark-intel">INTEL</span>
+      <div class="brand">
+        <span class="brand-mark">⬡</span>
+        <span class="brand-name"><span class="brand-prop">Prop</span><span class="brand-intel">Intel</span></span>
       </div>
-      <div class="tagline">AI Property Intelligence</div>
+      <span class="brand-tagline">AI Property Intelligence</span>
     </div>
   </header>
 
+  <div class="hero">
+    <div class="hero-inner">
+      <h1 class="hero-title">Know every risk before you buy</h1>
+      <p class="hero-sub">Free public data · FEMA · EPA · Census · USGS · OpenStreetMap</p>
+    </div>
+  </div>
+
   <main class="main">
+
+    <!-- Search -->
     <section class="search-section">
       <div class="search-card">
-        <label class="search-label">Enter a US Property Address</label>
-        <div class="search-row">
+        <div class="search-top">
           <input type="text" id="addressInput" class="address-input"
-            placeholder="e.g. 1600 Pennsylvania Ave NW, Washington DC"
+            placeholder="Enter a US property address…"
             autocomplete="off" />
+          <button class="analyze-btn" id="analyzeBtn">
+            <span class="btn-icon">→</span> Analyze
+          </button>
         </div>
-        <div class="mode-row">
-          <span class="mode-label">Analysis Mode:</span>
+        <div class="search-bottom">
+          <span class="mode-label">Analysis mode</span>
           <div class="mode-pills">
-            <button class="mode-pill active" data-mode="buyer" id="pilBuyer">Buyer</button>
-            <button class="mode-pill" data-mode="investor" id="pilInvestor">Investor</button>
+            <button class="mode-pill active" data-mode="buyer">🏠 Buyer</button>
+            <button class="mode-pill" data-mode="investor">📈 Investor</button>
           </div>
         </div>
-        <button class="analyze-btn" id="analyzeBtn">Analyze Property</button>
       </div>
     </section>
 
+    <!-- Loading -->
     <div id="loadingPanel" class="loading-panel hidden">
+      <div class="loading-header">
+        <div class="spinner"></div>
+        <span class="loading-title">Analyzing property…</span>
+      </div>
       <div class="loading-steps">
-        <div class="loading-step active" id="step1">
-          <span class="step-dot"></span>
-          <span>Geocoding address</span>
-        </div>
-        <div class="loading-step" id="step2">
-          <span class="step-dot"></span>
-          <span>Fetching public data</span>
-        </div>
-        <div class="loading-step" id="step3">
-          <span class="step-dot"></span>
-          <span>Running AI analysis</span>
-        </div>
-        <div class="loading-step" id="step4">
-          <span class="step-dot"></span>
-          <span>Synthesizing report</span>
-        </div>
+        <div class="loading-step" id="step1"><span class="step-dot"></span>Geocoding address</div>
+        <div class="loading-step" id="step2"><span class="step-dot"></span>Fetching public data sources</div>
+        <div class="loading-step" id="step3"><span class="step-dot"></span>Running AI risk agents</div>
+        <div class="loading-step" id="step4"><span class="step-dot"></span>Synthesizing report</div>
       </div>
     </div>
 
+    <!-- Error -->
     <div id="errorBanner" class="error-banner hidden">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm.75 4.5v3.25a.75.75 0 01-1.5 0V5.5a.75.75 0 011.5 0zm-.75 6.5a.75.75 0 110-1.5.75.75 0 010 1.5z"/></svg>
       <span id="errorMsg"></span>
     </div>
 
+    <!-- Results -->
     <section id="resultsPanel" class="results-panel hidden">
-      <div class="results-header">
-        <div class="results-address">
-          <span class="mono" id="resultAddress"></span>
-          <span class="coords mono" id="resultCoords"></span>
+
+      <!-- Address bar -->
+      <div class="result-address-bar">
+        <div class="result-address-left">
+          <span class="result-pin">📍</span>
+          <div>
+            <div class="result-address-text" id="resultAddress"></div>
+            <div class="result-coords" id="resultCoords"></div>
+          </div>
         </div>
-        <div class="mode-badge" id="resultMode"></div>
+        <div class="result-meta-right">
+          <span class="mode-chip" id="resultMode"></span>
+          <span class="confidence-chip">
+            Confidence: <strong id="confidenceValue"></strong>
+          </span>
+        </div>
       </div>
 
+      <!-- Score cards -->
       <div class="scores-grid" id="scoresGrid"></div>
 
-      <div class="narrative-card">
-        <div class="card-title">AI Risk Narrative</div>
-        <div class="narrative-text" id="narrativeText"></div>
+      <!-- Score breakdown (collapsible) -->
+      <div class="breakdown-section" id="breakdownSection" style="display:none">
+        <button class="breakdown-toggle" onclick="toggleBreakdown()">
+          <span>Score Breakdown</span>
+          <span class="breakdown-chevron" id="breakdownChevron">›</span>
+        </button>
+        <div class="breakdown-body hidden" id="breakdownBody"></div>
       </div>
 
-      <div class="advice-card" id="adviceCard">
-        <div class="card-title" id="adviceTitle">Mode Advice</div>
-        <div class="advice-text" id="adviceText"></div>
+      <!-- Two-column layout: narrative + advice -->
+      <div class="cards-row">
+        <div class="narrative-card">
+          <div class="card-label">
+            <span class="label-icon">🤖</span> AI Risk Narrative
+          </div>
+          <div class="narrative-text" id="narrativeText"></div>
+        </div>
+        <div class="advice-card" id="adviceCard">
+          <div class="card-label">
+            <span class="label-icon" id="adviceIcon">💡</span>
+            <span id="adviceTitle">Advice</span>
+          </div>
+          <div class="advice-text" id="adviceText"></div>
+        </div>
       </div>
 
+      <!-- Risk factors -->
       <div class="risks-section">
-        <div class="card-title">Risk Factors</div>
+        <div class="section-header">
+          <h3 class="section-title">Risk Factors</h3>
+          <span class="risk-count" id="riskCount"></span>
+        </div>
         <div id="risksList"></div>
       </div>
 
-      <div class="sources-footer">
-        <span class="mono">Powered by free public data sources: </span>
-        <span id="sourcesList" class="mono teal"></span>
+      <!-- Footer -->
+      <div class="report-footer">
+        <div class="footer-sources">
+          <span class="footer-label">Data sources:</span>
+          <span id="sourcesList"></span>
+        </div>
+        <div class="footer-disclaimer">
+          For informational purposes only. Not a substitute for professional inspection.
+        </div>
       </div>
 
-      <div class="confidence-footer">
-        <span class="mono">Overall Confidence: </span>
-        <span id="confidenceValue" class="mono amber"></span>
-      </div>
     </section>
   </main>
 
