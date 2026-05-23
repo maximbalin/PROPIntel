@@ -1,11 +1,13 @@
 """
 Firecrawl-powered property listing scraper.
 
-Uses the Firecrawl REST API (https://api.firecrawl.dev/v1/scrape) to extract
-structured property data from Realtor.com, Zillow, and Redfin. Firecrawl handles
-JavaScript rendering, anti-bot countermeasures, and AI-based JSON extraction.
+Two modes:
+  Local (self-hosted):  set FIRECRAWL_API_URL=http://localhost:3002
+                        No API key required. Run: scripts/setup-firecrawl.sh
+  Cloud:                set FIRECRAWL_API_KEY=fc-...
+                        Rate-limited by plan (500 pages/mo free).
 
-Requires FIRECRAWL_API_KEY in environment. Falls back gracefully when not set.
+Local takes priority. Falls back gracefully when neither is configured.
 """
 import logging
 import re
@@ -15,7 +17,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v1/scrape"
+FIRECRAWL_CLOUD_BASE = "https://api.firecrawl.dev"
 
 # JSON schema passed to Firecrawl's AI extraction engine
 PROPERTY_SCHEMA = {
@@ -95,18 +97,33 @@ def _parse_address(address: str) -> dict:
     return {"street": street, "city": city, "state": state}
 
 
+def _get_endpoint(settings) -> tuple[str, str]:
+    """
+    Returns (scrape_endpoint_url, api_key).
+    Local self-hosted takes priority; cloud API key is fallback.
+    Returns ("", "") when neither is configured.
+    """
+    local_url = (getattr(settings, "firecrawl_api_url", "") or "").rstrip("/")
+    api_key   = (getattr(settings, "firecrawl_api_key", "") or "")
+    if local_url:
+        return f"{local_url}/v1/scrape", ""   # no auth needed for self-hosted
+    if api_key:
+        return f"{FIRECRAWL_CLOUD_BASE}/v1/scrape", api_key
+    return "", ""
+
+
 async def _firecrawl_scrape(
-    url: str, prompt: str, api_key: str, timeout: float = 45.0
+    url: str, prompt: str, endpoint: str, api_key: str, timeout: float = 45.0
 ) -> dict | None:
     """POST to Firecrawl /v1/scrape with JSON extraction schema. Returns extracted data or None."""
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
-                FIRECRAWL_SCRAPE_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                endpoint,
+                headers=headers,
                 json={
                     "url": url,
                     "formats": ["json"],
@@ -136,7 +153,7 @@ async def _firecrawl_scrape(
         return None
 
 
-async def _try_realtor(address: str, api_key: str) -> dict | None:
+async def _try_realtor(address: str, endpoint: str, api_key: str) -> dict | None:
     """
     Find the Realtor.com listing page via their public suggest API,
     then extract structured data with Firecrawl.
@@ -200,14 +217,14 @@ async def _try_realtor(address: str, api_key: str) -> dict | None:
         "property type, HOA fees, annual taxes, days on market, garage spaces, "
         "heating/cooling, listing status, and property description."
     )
-    extracted = await _firecrawl_scrape(listing_url, prompt, api_key)
+    extracted = await _firecrawl_scrape(listing_url, prompt, endpoint, api_key)
     if extracted:
         extracted["listing_url"] = listing_url
         extracted["source"] = "Realtor.com"
     return extracted
 
 
-async def _try_zillow(address: str, api_key: str) -> dict | None:
+async def _try_zillow(address: str, endpoint: str, api_key: str) -> dict | None:
     """Find the Zillow listing URL via autocomplete, then extract with Firecrawl."""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -251,14 +268,14 @@ async def _try_zillow(address: str, api_key: str) -> dict | None:
         "property type, monthly HOA fee, annual property tax, days on market, "
         "garage spaces, heating/cooling type, listing status, and the property description."
     )
-    extracted = await _firecrawl_scrape(listing_url, prompt, api_key)
+    extracted = await _firecrawl_scrape(listing_url, prompt, endpoint, api_key)
     if extracted:
         extracted["listing_url"] = listing_url
         extracted["source"] = "Zillow"
     return extracted
 
 
-async def _try_redfin(address: str, api_key: str) -> dict | None:
+async def _try_redfin(address: str, endpoint: str, api_key: str) -> dict | None:
     """Find the Redfin listing URL via autocomplete, then extract with Firecrawl."""
     parsed = _parse_address(address)
     city, state = parsed["city"], parsed["state"]
@@ -309,7 +326,7 @@ async def _try_redfin(address: str, api_key: str) -> dict | None:
         "property type, HOA fee per month, annual property tax, days on market, "
         "garage spaces, heating/cooling, listing status, and property description."
     )
-    extracted = await _firecrawl_scrape(listing_url, prompt, api_key)
+    extracted = await _firecrawl_scrape(listing_url, prompt, endpoint, api_key)
     if extracted:
         extracted["listing_url"] = listing_url
         extracted["source"] = "Redfin"
@@ -319,18 +336,27 @@ async def _try_redfin(address: str, api_key: str) -> dict | None:
 async def get_listing_firecrawl(address: str) -> dict | None:
     """
     Try Realtor.com → Zillow → Redfin using Firecrawl for AI-based extraction.
-    Returns None if FIRECRAWL_API_KEY is not configured.
+
+    Priority:
+      1. FIRECRAWL_API_URL  — self-hosted (no limit, no API key)
+      2. FIRECRAWL_API_KEY  — cloud (rate-limited)
+      3. Neither set        — returns None, caller uses direct scrapers
+
     Returns a dict with property data or {"error": ...} on full failure.
     """
     from backend.config import get_settings
 
-    api_key = getattr(get_settings(), "firecrawl_api_key", "") or ""
-    if not api_key:
-        return None  # caller falls back to direct scraping
+    settings = get_settings()
+    endpoint, api_key = _get_endpoint(settings)
+    if not endpoint:
+        return None  # neither local nor cloud configured — use direct scrapers
+
+    mode = "local" if not api_key else "cloud"
+    logger.info(f"Firecrawl listing fetch ({mode}): {endpoint}")
 
     for attempt in [_try_realtor, _try_zillow, _try_redfin]:
         try:
-            result = await attempt(address, api_key)
+            result = await attempt(address, endpoint, api_key)
             if result and not result.get("error"):
                 return result
         except Exception as e:

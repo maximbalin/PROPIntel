@@ -1,0 +1,88 @@
+# Firecrawl self-hosted services — compose override for PropIntel.
+#
+# Prerequisites:
+#   1. Run scripts/setup-firecrawl.sh  (clones Firecrawl source into ./firecrawl/)
+#   2. Add FIRECRAWL_API_URL=http://localhost:3002 to your .env
+#   3. Ensure OPENAI_API_KEY is set in .env (used by Firecrawl for JSON extraction)
+#
+# Start everything:
+#   docker compose -f docker-compose.yml -f docker-compose.firecrawl.yml up --build -d
+#
+# Firecrawl API:       http://localhost:3002
+# Queue admin UI:      http://localhost:3002/admin/propintel-local/queues
+# No Firecrawl API key needed — self-hosted runs without authentication.
+
+services:
+
+  # ── Browser renderer (Playwright / Chromium) ──────────────────
+  firecrawl-playwright:
+    build:
+      context: ./firecrawl/apps/playwright-service-ts
+      args:
+        PORT: "3000"
+    environment:
+      PORT: "3000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: "3G"
+
+  # ── Firecrawl API + worker ─────────────────────────────────────
+  firecrawl-api:
+    build:
+      context: ./firecrawl/apps/api
+    ports:
+      - "3002:3002"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3002"
+
+      # No Supabase / DB auth — open self-hosted mode
+      USE_DB_AUTHENTICATION: "false"
+
+      # Shared Redis from PropIntel's docker-compose.yml
+      REDIS_URL: "redis://redis:6379"
+      REDIS_RATE_LIMIT_URL: "redis://redis:6379"
+
+      # Playwright browser renderer (internal service name)
+      PLAYWRIGHT_MICROSERVICE_URL: "http://firecrawl-playwright:3000/scrape"
+
+      # OpenAI key — required for JSON schema extraction
+      # Reuses PropIntel's key from your .env
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+
+      # Worker concurrency — tune for your machine
+      NUM_WORKERS_PER_QUEUE: "4"
+      CRAWL_CONCURRENT_REQUESTS: "8"
+      MAX_CONCURRENT_JOBS: "4"
+
+      # Admin panel password (change if exposed to network)
+      BULL_AUTH_KEY: "propintel-local"
+
+      # Disable telemetry
+      POSTHOG_API_KEY: ""
+    depends_on:
+      redis:
+        condition: service_healthy
+      firecrawl-playwright:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/v1/health"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: "6G"
