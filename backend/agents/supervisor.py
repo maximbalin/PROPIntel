@@ -23,7 +23,8 @@ async def synthesizer_node(state: dict) -> dict:
     infra_report = state.get("infra_report", {})
     neighborhood_report = state.get("neighborhood_report", {})
 
-    fallback_scores = compute_scores(env_report, infra_report, neighborhood_report)
+    raw_data = state.get("raw_data", {})
+    fallback_scores = compute_scores(env_report, infra_report, neighborhood_report, raw_data=raw_data)
 
     prompt = SYNTHESIZER_PROMPT.format(
         address=state.get("address", ""),
