@@ -115,42 +115,59 @@ def _get_endpoint(settings) -> tuple[str, str]:
 async def _firecrawl_scrape(
     url: str, prompt: str, endpoint: str, api_key: str, timeout: float = 45.0
 ) -> dict | None:
-    """POST to Firecrawl /v1/scrape with JSON extraction schema. Returns extracted data or None."""
+    """POST to Firecrawl /v1/scrape with AI extraction. Tries newer extract format, falls back to json."""
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                endpoint,
-                headers=headers,
-                json={
-                    "url": url,
-                    "formats": ["json"],
-                    "jsonOptions": {
-                        "schema": PROPERTY_SCHEMA,
-                        "prompt": prompt,
-                    },
-                    "waitFor": 3000,
-                    "onlyMainContent": True,
-                },
-            )
-            resp.raise_for_status()
-            body = resp.json()
-            if not body.get("success"):
-                logger.warning(f"Firecrawl non-success for {url}: {body.get('error')}")
-                return None
-            extracted = (body.get("data") or {}).get("json") or {}
-            if not extracted.get("price") and not extracted.get("beds"):
-                logger.debug(f"Firecrawl returned empty extraction for {url}")
-                return None
-            return extracted
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"Firecrawl HTTP {e.response.status_code} for {url}")
-        return None
-    except Exception as e:
-        logger.warning(f"Firecrawl request failed for {url}: {e}")
-        return None
+
+    # Try newer extract format first (Firecrawl v0.5+), then fall back to jsonOptions
+    payloads = [
+        {
+            "url": url,
+            "formats": ["extract"],
+            "extract": {
+                "schema": PROPERTY_SCHEMA,
+                "prompt": prompt,
+            },
+            "waitFor": 3000,
+            "onlyMainContent": True,
+        },
+        {
+            "url": url,
+            "formats": ["json"],
+            "jsonOptions": {
+                "schema": PROPERTY_SCHEMA,
+                "prompt": prompt,
+            },
+            "waitFor": 3000,
+            "onlyMainContent": True,
+        },
+    ]
+
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for payload in payloads:
+            try:
+                resp = await client.post(endpoint, headers=headers, json=payload)
+                resp.raise_for_status()
+                body = resp.json()
+                if not body.get("success"):
+                    logger.debug(f"Firecrawl non-success for {url}: {body.get('error')}")
+                    continue
+                # extract format stores result under data.extract; json format under data.json
+                data_obj = body.get("data") or {}
+                extracted = data_obj.get("extract") or data_obj.get("json") or {}
+                if extracted.get("price") or extracted.get("beds") or extracted.get("sqft"):
+                    return extracted
+                logger.debug(f"Firecrawl empty extraction ({payload['formats'][0]}) for {url}")
+            except httpx.HTTPStatusError as e:
+                logger.debug(f"Firecrawl HTTP {e.response.status_code} ({payload['formats'][0]}) for {url}")
+                if e.response.status_code not in (400, 422):
+                    break  # non-format error, no point retrying with other format
+            except Exception as e:
+                logger.warning(f"Firecrawl request failed for {url}: {e}")
+                break
+
+    return None
 
 
 async def _try_realtor(address: str, endpoint: str, api_key: str) -> dict | None:
@@ -226,20 +243,37 @@ async def _try_realtor(address: str, endpoint: str, api_key: str) -> dict | None
 
 async def _try_zillow(address: str, endpoint: str, api_key: str) -> dict | None:
     """Find the Zillow listing URL via autocomplete, then extract with Firecrawl."""
+    _ua = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+    )
+    listing_url = None
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-                params={"q": address, "abKey": "", "clientId": "homepage-render"},
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
-                    )
-                },
-            )
-            resp.raise_for_status()
-            suggestions = resp.json().get("results", [])
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": _ua}) as client:
+            suggestions = []
+            for ac_url, ac_params in [
+                (
+                    "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                    {"q": address, "clientId": "homepage-render"},
+                ),
+                (
+                    "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                    {"q": address, "abKey": "placeholder", "clientId": "homepage-render"},
+                ),
+                (
+                    "https://www.zillow.com/autocomplete/v3/suggestions",
+                    {"q": address, "clientId": "homepage-render"},
+                ),
+            ]:
+                try:
+                    resp = await client.get(ac_url, params=ac_params)
+                    if resp.status_code == 200:
+                        suggestions = resp.json().get("results", [])
+                        if suggestions:
+                            break
+                except Exception:
+                    continue
+
             if not suggestions:
                 return None
 
@@ -247,9 +281,7 @@ async def _try_zillow(address: str, endpoint: str, api_key: str) -> dict | None:
                 (s for s in suggestions if s.get("resultType") == "Property"),
                 suggestions[0],
             )
-            detail_url = (
-                home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
-            )
+            detail_url = home.get("metaData", {}).get("detailUrl") or home.get("url") or ""
             if not detail_url:
                 return None
 

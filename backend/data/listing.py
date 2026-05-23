@@ -25,7 +25,17 @@ _REDFIN_HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Accept-Encoding": "gzip, deflate, br",
     "Referer": "https://www.redfin.com/",
+    "Origin": "https://www.redfin.com",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"macOS"',
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    "DNT": "1",
 }
 
 
@@ -251,12 +261,31 @@ async def _fetch_zillow(address: str) -> dict | None:
     async with httpx.AsyncClient(
         timeout=20.0, follow_redirects=True, headers=_ZILLOW_HEADERS
     ) as client:
-        ac = await client.get(
-            "https://www.zillowstatic.com/autocomplete/v3/suggestions",
-            params={"q": address, "abKey": "", "clientId": "homepage-render"},
-        )
-        ac.raise_for_status()
-        suggestions = ac.json().get("results", [])
+        # Try multiple autocomplete endpoints — Zillow rotates them
+        suggestions = []
+        for ac_url, ac_params in [
+            (
+                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                {"q": address, "clientId": "homepage-render"},
+            ),
+            (
+                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                {"q": address, "abKey": "placeholder", "clientId": "homepage-render"},
+            ),
+            (
+                "https://www.zillow.com/autocomplete/v3/suggestions",
+                {"q": address, "clientId": "homepage-render"},
+            ),
+        ]:
+            try:
+                ac = await client.get(ac_url, params=ac_params)
+                if ac.status_code == 200:
+                    suggestions = ac.json().get("results", [])
+                    if suggestions:
+                        break
+            except Exception:
+                continue
+
         if not suggestions:
             return None
 
