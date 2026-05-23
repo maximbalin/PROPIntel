@@ -10,6 +10,12 @@ Raw data provided:
   bfe_available (true/false), firm_panel (FIRM map panel ID),
   firm_effective_date (YYYY-MM-DD), firm_panel_age_years (older panels are less reliable)
 - EPA Facilities Nearby: {epa_data}
+  Key fields: facility_count_total, facility_count_half_mile (most critical — within 0.5 mi),
+  tier1_count (Superfund/hazardous waste/toxic releases — worst),
+  tier2_count (air/water violations), aggregate_risk_score (0-100),
+  top_facilities list each with: name, distance_miles, tier (1=worst/2/3),
+  superfund, hazardous_waste, toxic_releases, air_violations, water_violations,
+  violation_count, penalty_count, total_penalties_usd
 - Elevation: {elevation_data}
 
 Your task:
@@ -19,7 +25,12 @@ Your task:
    - If sfha=true: mandatory flood insurance is required — always flag this
    - If bfe_available=true: cite the BFE in feet in your evidence
    - If firm_panel_age_years > 15: flag the FIRM panel as potentially outdated
-3. Identify specific risks with evidence from the data provided
+3. For EPA pollution risk — use tier + distance together:
+   - tier1 within 1.5 miles → always high or critical severity
+   - tier2 within 0.5 miles → high severity
+   - Cite facility name, distance, and violation/penalty counts as evidence
+   - If facility_count_total=0: explicitly note "no regulated facilities found within 3 miles"
+4. Identify specific risks with evidence from the data provided
 4. Do NOT invent risks not supported by the data. If data is missing, say so.
 5. Rate each risk: low / medium / high / critical
 6. Assign a confidence score (0-100) based on data quality
