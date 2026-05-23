@@ -35,6 +35,18 @@ def _haversine_m(lat1, lon1, lat2, lon2) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
+def _build_roads_query(radius_m: int, lat: float, lon: float) -> str:
+    """Fast, roads-only query — small payload, low timeout, high reliability."""
+    return f"""
+[out:json][timeout:25];
+(
+  way["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"](around:{radius_m},{lat},{lon});
+  way["railway"~"^(rail|subway|light_rail|tram)$"](around:{radius_m},{lat},{lon});
+);
+out geom tags qt;
+"""
+
+
 def _build_query(radius_m: int, lat: float, lon: float) -> str:
     """Comprehensive single Overpass query — all feature types, one request."""
     return f"""
@@ -64,7 +76,7 @@ def _build_query(radius_m: int, lat: float, lon: float) -> str:
   way["amenity"~"^(hospital|clinic)$"](around:{radius_m},{lat},{lon});
   node["amenity"~"^(restaurant|cafe|bar)$"](around:{radius_m},{lat},{lon});
 );
-out geom tags;
+out geom tags qt;
 """
 
 
@@ -257,8 +269,37 @@ def _compute_scores(near: dict, far: dict, roads: dict) -> dict:
 
 async def get_infrastructure(lat: float, lon: float) -> dict:
     try:
-        elements = await _fetch_overpass(_build_query(QUERY_RADIUS, lat, lon))
-        near, far, roads, amen = _parse_all(elements, lat, lon)
+        # Run a fast roads-only query first, then the full features query.
+        # Roads are parsed from BOTH; amenities/hazards from the full query only.
+        # If the full query fails, road risks are still guaranteed.
+        road_elements, all_elements = await asyncio.gather(
+            _fetch_overpass(_build_roads_query(QUERY_RADIUS, lat, lon)),
+            _fetch_overpass(_build_query(QUERY_RADIUS, lat, lon)),
+            return_exceptions=True,
+        )
+
+        if isinstance(road_elements, Exception):
+            logger.warning(f"OSM roads-only query failed: {road_elements}")
+            road_elements = []
+        if isinstance(all_elements, Exception):
+            logger.warning(f"OSM full query failed: {all_elements}")
+            all_elements = []
+
+        # Merge, dedup by (type, id) — full query elements take priority
+        seen: set = set()
+        merged: list[dict] = []
+        for el in (all_elements or []) + (road_elements or []):
+            key = (el.get("type"), el.get("id"))
+            if key not in seen:
+                seen.add(key)
+                merged.append(el)
+
+        logger.info(
+            f"OSM merged: {len(road_elements)} road + {len(all_elements)} full "
+            f"→ {len(merged)} unique elements"
+        )
+
+        near, far, roads, amen = _parse_all(merged, lat, lon)
         scores = _compute_scores(near, far, roads)
         return {
             "within_300m":  near,

@@ -630,7 +630,7 @@ def _build_hidden_costs(raw_data: dict, llm_costs: list) -> list[HiddenCost]:
 async def analyze(req: AnalyzeRequest):
     settings = get_settings()
 
-    cache_key = f"assessment:v9:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v10:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     cached = await redis.get(cache_key)
     if cached:
@@ -746,9 +746,13 @@ async def analyze(req: AnalyzeRequest):
     for dr in det_risks:
         cat = dr.category.lower()
         if cat.startswith("traffic_"):
-            # "traffic_{cls}_road" — skip only if LLM named this exact road class
             parts = cat.split("_")
             cls = parts[1] if len(parts) >= 2 else ""
+            # Motorway and trunk are always critical — never suppress them
+            if cls in ("motorway", "trunk"):
+                risks.append(dr)
+                continue
+            # Other road classes: suppress only if LLM named this exact class
             if cls in llm_road_classes:
                 continue
         elif "flood" in cat:
