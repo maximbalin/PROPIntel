@@ -19,17 +19,36 @@ echo ""
 
 # ── 1. Clone Firecrawl source ──────────────────────────────────
 if [ -d "$FIRECRAWL_DIR/.git" ]; then
-  echo "[1/3] Firecrawl already cloned at ./firecrawl — pulling latest..."
+  echo "[1/4] Firecrawl already cloned at ./firecrawl — pulling latest..."
   git -C "$FIRECRAWL_DIR" pull --ff-only || true
 else
-  echo "[1/3] Cloning Firecrawl (shallow clone, ~30 seconds)..."
+  echo "[1/4] Cloning Firecrawl (shallow clone, ~30 seconds)..."
   git clone --depth=1 https://github.com/mendableai/firecrawl.git "$FIRECRAWL_DIR"
   echo "      Cloned to ./firecrawl"
 fi
 echo ""
 
-# ── 2. Patch .env ──────────────────────────────────────────────
-echo "[2/3] Configuring .env..."
+# ── 2. Patch Playwright Dockerfile for SSL proxy environments ──
+# WSL and corporate networks often have SSL inspection proxies that cause
+# self-signed certificate errors when Playwright downloads Chromium.
+# We insert NODE_TLS_REJECT_UNAUTHORIZED=0 before the install step.
+echo "[2/4] Patching Playwright Dockerfile for SSL proxy compatibility..."
+PLAYWRIGHT_DF="$FIRECRAWL_DIR/apps/playwright-service-ts/Dockerfile"
+if [ -f "$PLAYWRIGHT_DF" ]; then
+  if grep -q "NODE_TLS_REJECT_UNAUTHORIZED" "$PLAYWRIGHT_DF"; then
+    echo "      Already patched — skipping"
+  else
+    # Insert ENV line before the playwright install line
+    sed -i '/RUN npx playwright install/i ENV NODE_TLS_REJECT_UNAUTHORIZED=0' "$PLAYWRIGHT_DF"
+    echo "      Patched: disabled TLS verification for Chromium download"
+  fi
+else
+  echo "      Warning: Playwright Dockerfile not found at expected path — skipping patch"
+fi
+echo ""
+
+# ── 3. Patch .env ──────────────────────────────────────────────
+echo "[3/4] Configuring .env..."
 
 if [ ! -f "$ENV_FILE" ]; then
   cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
@@ -54,8 +73,8 @@ if grep -q "^FIRECRAWL_API_KEY=fc-" "$ENV_FILE"; then
 fi
 echo ""
 
-# ── 3. Check prerequisites ─────────────────────────────────────
-echo "[3/3] Checking prerequisites..."
+# ── 4. Check prerequisites ─────────────────────────────────────
+echo "[4/4] Checking prerequisites..."
 
 OK=true
 
