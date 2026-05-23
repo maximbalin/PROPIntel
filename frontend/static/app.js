@@ -113,15 +113,37 @@ function renderListingData(listing) {
     ? `<img src="${listing.photos[0]}" alt="Property photo" loading="lazy">`
     : `<div class="listing-photo-placeholder">🏠</div>`;
 
-  const priceHtml = listing.price
-    ? `<div class="listing-price">$${listing.price.toLocaleString()}</div>`
+  const statusBadge = listing.status
+    ? `<span class="listing-status-badge listing-status-${listing.status.toLowerCase().replace(/\s+/g,'-')}">${listing.status}</span>`
     : '';
 
+  const priceHtml = listing.price
+    ? `<div class="listing-price">$${listing.price.toLocaleString()} ${statusBadge}</div>`
+    : statusBadge ? `<div class="listing-price">${statusBadge}</div>` : '';
+
+  // Primary specs row
   const specs = [];
-  if (listing.beds)       specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🛏</span>${listing.beds} bed${listing.beds !== 1 ? 's' : ''}</span>`);
-  if (listing.baths)      specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚿</span>${listing.baths} bath${listing.baths !== 1 ? 's' : ''}</span>`);
-  if (listing.sqft)       specs.push(`<span class="listing-spec"><span class="listing-spec-icon">📐</span>${listing.sqft.toLocaleString()} sqft</span>`);
-  if (listing.year_built) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🏗</span>Built ${listing.year_built}</span>`);
+  if (listing.beds)          specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🛏</span>${listing.beds} bed${listing.beds !== 1 ? 's' : ''}</span>`);
+  if (listing.baths)         specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚿</span>${listing.baths} bath${listing.baths !== 1 ? 's' : ''}</span>`);
+  if (listing.sqft)          specs.push(`<span class="listing-spec"><span class="listing-spec-icon">📐</span>${listing.sqft.toLocaleString()} sqft</span>`);
+  if (listing.year_built)    specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🏗</span>Built ${listing.year_built}</span>`);
+  if (listing.lot_size_sqft) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🌳</span>${listing.lot_size_sqft.toLocaleString()} sqft lot</span>`);
+  if (listing.garage_spaces) specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚗</span>${listing.garage_spaces}-car garage</span>`);
+
+  // Financial details row (HOA, taxes, DOM)
+  const fin = [];
+  if (listing.hoa_fee_monthly != null) fin.push(`<span class="listing-fin-item"><strong>HOA</strong> $${listing.hoa_fee_monthly.toLocaleString()}/mo</span>`);
+  if (listing.tax_annual != null)      fin.push(`<span class="listing-fin-item"><strong>Tax</strong> $${Math.round(listing.tax_annual).toLocaleString()}/yr</span>`);
+  if (listing.days_on_market != null)  fin.push(`<span class="listing-fin-item"><strong>DOM</strong> ${listing.days_on_market} days</span>`);
+  if (listing.property_type)           fin.push(`<span class="listing-fin-item"><strong>Type</strong> ${listing.property_type}</span>`);
+  if (listing.heating_cooling)         fin.push(`<span class="listing-fin-item"><strong>HVAC</strong> ${listing.heating_cooling}</span>`);
+
+  const finRow = fin.length ? `<div class="listing-fin-row">${fin.join('')}</div>` : '';
+
+  // Description (truncate at 200 chars)
+  const descHtml = listing.description
+    ? `<div class="listing-desc">${listing.description.substring(0, 220)}${listing.description.length > 220 ? '…' : ''}</div>`
+    : '';
 
   const linkHtml = listing.listing_url
     ? `<a class="listing-link" href="${listing.listing_url}" target="_blank" rel="noopener">View on ${listing.source || 'listing site'} →</a>`
@@ -134,6 +156,8 @@ function renderListingData(listing) {
         <div class="listing-source-badge">🏠 Property Listing · ${listing.source || 'Unknown source'}</div>
         ${priceHtml}
         <div class="listing-specs">${specs.join('')}</div>
+        ${finRow}
+        ${descHtml}
         ${linkHtml}
       </div>
     </div>`;

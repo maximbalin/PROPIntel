@@ -385,6 +385,30 @@ body {
 }
 .listing-spec { display: flex; align-items: center; gap: 0.3rem; }
 .listing-spec-icon { font-size: 0.95rem; }
+.listing-price {
+  display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+}
+.listing-status-badge {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; padding: 0.2em 0.55em;
+  border-radius: 3px; vertical-align: middle;
+}
+.listing-status-for-sale  { background: #dcfce7; color: #15803d; }
+.listing-status-pending   { background: #fef9c3; color: #854d0e; }
+.listing-status-sold      { background: #fee2e2; color: #991b1b; }
+.listing-status-off-market { background: #f1f5f9; color: #64748b; }
+.listing-fin-row {
+  display: flex; gap: 1rem; flex-wrap: wrap;
+  font-size: 0.8rem; color: var(--text-sub);
+  border-top: 1px solid #f1f5f9; padding-top: 0.4rem;
+}
+.listing-fin-item { white-space: nowrap; }
+.listing-fin-item strong { color: var(--text); }
+.listing-desc {
+  font-size: 0.8rem; color: var(--muted); line-height: 1.5;
+  max-height: 3.6rem; overflow: hidden;
+  border-top: 1px solid #f1f5f9; padding-top: 0.4rem;
+}
 .listing-link {
   margin-top: auto; display: inline-block;
   font-size: 0.8125rem; font-weight: 600;

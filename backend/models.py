@@ -74,15 +74,24 @@ class NearbyRisk(BaseModel):
 
 
 class ListingData(BaseModel):
-    price:       Optional[int]   = None
-    beds:        Optional[int]   = None
-    baths:       Optional[float] = None
-    sqft:        Optional[int]   = None
-    year_built:  Optional[int]   = None
-    listing_url: Optional[str]   = None
-    photos:      List[str]       = []
-    source:      Optional[str]   = None
-    error:       Optional[str]   = None
+    price:             Optional[int]   = None
+    beds:              Optional[int]   = None
+    baths:             Optional[float] = None
+    sqft:              Optional[int]   = None
+    year_built:        Optional[int]   = None
+    property_type:     Optional[str]   = None
+    lot_size_sqft:     Optional[int]   = None
+    hoa_fee_monthly:   Optional[float] = None
+    tax_annual:        Optional[float] = None
+    status:            Optional[str]   = None
+    days_on_market:    Optional[int]   = None
+    garage_spaces:     Optional[int]   = None
+    heating_cooling:   Optional[str]   = None
+    description:       Optional[str]   = None
+    listing_url:       Optional[str]   = None
+    photos:            List[str]       = []
+    source:            Optional[str]   = None
+    error:             Optional[str]   = None
 
 
 class HiddenCost(BaseModel):

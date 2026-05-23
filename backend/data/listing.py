@@ -30,10 +30,21 @@ _REDFIN_HEADERS = {
 
 async def get_listing_data(address: str, lat: float = None, lon: float = None) -> dict:
     """
-    Try Zillow then Redfin for property listing data.
-    Returns dict with price/beds/baths/sqft/year_built/listing_url/photos/source
-    or {"error": ...} on full failure.
+    Fetch property listing data.
+    Priority: Firecrawl (Realtor.com → Zillow → Redfin) if API key set,
+    then direct HTTP scrapers (Zillow → Redfin) as fallback.
+    Returns dict with property fields or {"error": ...} on full failure.
     """
+    # ── 1. Firecrawl (rich structured extraction, all three sites) ──
+    try:
+        from backend.data.listing_firecrawl import get_listing_firecrawl
+        fc_result = await get_listing_firecrawl(address)
+        if fc_result and not fc_result.get("error"):
+            return fc_result
+    except Exception as e:
+        logger.warning(f"Firecrawl listing fetch failed: {e}")
+
+    # ── 2. Direct HTTP scrapers (no API key needed) ──────────────
     for fetcher, name in [(_fetch_zillow, "Zillow"), (_fetch_redfin, "Redfin")]:
         try:
             result = await fetcher(address)
@@ -43,7 +54,7 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
         except Exception as e:
             logger.warning(f"{name} listing fetch failed: {e}")
 
-    return {"error": "Property listing not found", "sources_tried": ["Zillow", "Redfin"]}
+    return {"error": "Property listing not found", "sources_tried": ["Realtor.com", "Zillow", "Redfin"]}
 
 
 async def _fetch_zillow(address: str) -> dict | None:
