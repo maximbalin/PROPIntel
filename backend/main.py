@@ -372,17 +372,52 @@ def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
         ev["livability"].append(f"Low noise environment, score {noise}/100 (source: OpenStreetMap)")
 
     # ── Hidden risk ────────────────────────────────────────
+    zone_str = fema.get("flood_zone", "")
+    bfe_feet = fema.get("bfe_feet")
+    bfe_txt  = f", BFE {bfe_feet} ft NAVD88" if bfe_feet else ""
     if fema.get("sfha"):
         ev["hidden_risk"].append(
-            "SFHA flood zone — mandatory flood insurance adds $700-3,200/yr (source: FEMA)")
-    else:
-        ev["hidden_risk"].append("No SFHA — flood insurance not mandatory (source: FEMA NFHL)")
-
-    if t1 > 0:
+            f"FEMA Zone {zone_str}{bfe_txt} — SFHA (100-yr floodplain), mandatory flood insurance "
+            f"adds $700–3,200/yr (source: FEMA NFHL)")
+    elif zone_str:
         ev["hidden_risk"].append(
-            f"{t1} Tier-1 hazardous site(s) in area — environmental liability risk (source: EPA ECHO)")
+            f"FEMA Zone {zone_str} — not SFHA, flood insurance not mandatory but recommended "
+            f"(source: FEMA NFHL)")
     else:
-        ev["hidden_risk"].append("No Tier-1 EPA hazardous sites within 3 miles (source: EPA ECHO)")
+        ev["hidden_risk"].append("No FEMA flood zone confirmed for this location (source: FEMA NFHL)")
+
+    # Named EPA facilities — list each by name, distance, and specific hazard type
+    top_facs = epa.get("top_facilities") or []
+    named_facs = [f for f in top_facs if f.get("name")]
+    if named_facs:
+        for fac in named_facs[:3]:
+            name     = fac.get("name", "Unknown facility")
+            dist_mi  = fac.get("distance_miles")
+            dist_txt = f"{dist_mi:.1f} mi" if dist_mi is not None else "nearby"
+            hazards  = []
+            if fac.get("superfund"):
+                hazards.append("Superfund site")
+            if fac.get("hazardous_waste"):
+                hazards.append("hazardous waste handler")
+            if fac.get("toxic_releases"):
+                hazards.append("toxic releases (TRI)")
+            if fac.get("air_violations"):
+                hazards.append("air quality violations")
+            if fac.get("water_violations"):
+                hazards.append("water quality violations")
+            tier = fac.get("tier", 3)
+            tier_label = f"Tier-{tier}" if tier else ""
+            violations = fac.get("violation_count", 0)
+            penalties  = fac.get("total_penalties_usd", 0)
+            penalty_txt = f", ${penalties:,.0f} in penalties" if penalties else ""
+            v_txt = f"{violations} violations{penalty_txt}" if violations else ""
+            hazard_str = "; ".join(hazards) if hazards else "regulated facility"
+            detail = f"{v_txt} — " if v_txt else ""
+            ev["hidden_risk"].append(
+                f"{name} ({dist_txt}) — {tier_label}: {hazard_str}. "
+                f"{detail}Environmental liability risk (source: EPA ECHO)")
+    elif t1 == 0 and total_fac == 0:
+        ev["hidden_risk"].append("No EPA-regulated hazardous facilities within 3 miles (source: EPA ECHO)")
 
     age = census.get("housing_age_years")
     if age and age > 50:
@@ -390,15 +425,19 @@ def _build_score_evidence(raw_data: dict, llm_evidence: dict | None) -> dict:
             f"Housing stock median age {age} yrs — potential deferred maintenance (source: US Census)")
 
     # Merge: if LLM provided evidence for a score, prefer it (it's more contextual)
+    # Exception: hidden_risk always uses deterministic data — LLM lacks specific facility names
     if llm_evidence and isinstance(llm_evidence, dict):
         for k in ev:
+            if k == "hidden_risk":
+                continue  # always keep named-facility bullets, never let LLM override
             llm_bullets = llm_evidence.get(k) or []
             if len(llm_bullets) >= 2:
                 ev[k] = llm_bullets  # LLM wins if it gave at least 2 bullets
 
-    # Cap at 4 bullets per score
+    # Cap bullets per score (hidden_risk gets more room for named facilities)
     for k in ev:
-        ev[k] = ev[k][:4]
+        cap = 6 if k == "hidden_risk" else 4
+        ev[k] = ev[k][:cap]
 
     return ev
 
@@ -639,7 +678,7 @@ async def flush_cache(address: str = Query(..., description="Full property addre
 
     raw_key  = f"raw:v7:{lat:.4f}:{lon:.4f}"
     ass_keys = [
-        f"assessment:v11:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
+        f"assessment:v12:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
         for mode in ("buyer", "investor")
     ]
     deleted = 0
@@ -656,7 +695,7 @@ async def analyze(
 ):
     settings = get_settings()
 
-    cache_key = f"assessment:v11:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v12:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     if not force_refresh:
         cached = await redis.get(cache_key)
