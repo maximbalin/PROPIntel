@@ -50,17 +50,35 @@ fi
 
 API_DF="$FIRECRAWL_DIR/apps/api/Dockerfile"
 if [ -f "$API_DF" ]; then
-  if grep -q "RUSTUP_USE_CURL" "$API_DF"; then
+  if grep -q "curl.real" "$API_DF"; then
     echo "      API Dockerfile already patched — skipping"
   else
-    # RUSTUP_USE_CURL=1 forces rustup to use system curl (not its own HTTP client)
-    # for ALL downloads, including the toolchain. System curl then reads /root/.curlrc
-    # which has 'insecure', bypassing SSL verification for the proxy.
-    # This must be set BEFORE the rustup install line.
-    sed -i "/RUN curl.*sh.rustup.rs/i ENV RUSTUP_USE_CURL=1 NPM_CONFIG_STRICT_SSL=false NODE_TLS_REJECT_UNAUTHORIZED=0" "$API_DF"
-    # /root/.curlrc insecure makes ALL curl calls (including rustup's) skip SSL
-    sed -i "/RUN curl.*sh.rustup.rs/i RUN echo 'insecure' > /root/.curlrc" "$API_DF"
-    echo "      API: RUSTUP_USE_CURL=1 + /root/.curlrc insecure + Node.js SSL bypass"
+    # Replace the curl binary with a wrapper that always passes --insecure.
+    # This covers ALL callers: the outer curl, rustup's inner curl calls,
+    # pnpm, and any other tool that shells out to curl — regardless of
+    # whether they pass -q or other flags that suppress .curlrc.
+    python3 - "$API_DF" << 'PYEOF'
+import sys, re
+
+path = sys.argv[1]
+content = open(path).read()
+
+# Remove previous partial patches that didn't fully work
+content = content.replace("RUN echo 'insecure' > /root/.curlrc\n", "")
+
+wrapper = """# WSL/corporate SSL proxy fix — replace curl binary with insecure wrapper
+# This intercepts ALL curl calls (including from rustup and pnpm) so they
+# skip SSL certificate verification regardless of what arguments they pass.
+RUN cp /usr/bin/curl /usr/bin/curl.real \\
+    && echo '#!/bin/sh' > /usr/bin/curl \\
+    && echo 'exec /usr/bin/curl.real --insecure "$@"' >> /usr/bin/curl \\
+    && chmod +x /usr/bin/curl
+"""
+
+content = re.sub(r'(RUN curl[^\n]*sh\.rustup\.rs)', wrapper + r'\1', content)
+open(path, 'w').write(content)
+print("      API: curl binary wrapped to always pass --insecure")
+PYEOF
   fi
 else
   echo "      Warning: API Dockerfile not found — skipping"
