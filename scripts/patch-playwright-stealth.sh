@@ -35,31 +35,57 @@ cp "$PKG" "$PKG.bak" && echo "    Backed up package.json"
 
 # ── Find the main TypeScript entrypoint ──────────────────────────────────────
 SRC=""
-for candidate in \
-    "$SERVICE_DIR/src/index.ts" \
-    "$SERVICE_DIR/src/app.ts" \
-    "$SERVICE_DIR/src/server.ts" \
-    "$SERVICE_DIR/index.ts"
-do
-    if [ -f "$candidate" ]; then
-        SRC="$candidate"
-        break
+
+# Search the whole service dir for any .ts file importing playwright
+for search_dir in "$SERVICE_DIR/src" "$SERVICE_DIR"; do
+    if [ -d "$search_dir" ]; then
+        found=$(grep -rl "from 'playwright'\|require('playwright')\|require(\"playwright\")" "$search_dir" --include="*.ts" 2>/dev/null | head -1)
+        if [ -n "$found" ]; then
+            SRC="$found"
+            break
+        fi
     fi
 done
 
+# Also try compiled JS if no TS found
 if [ -z "$SRC" ]; then
-    # Fall back: find the file that imports playwright
-    SRC=$(grep -rl "from 'playwright'" "$SERVICE_DIR/src" 2>/dev/null | head -1)
+    for search_dir in "$SERVICE_DIR/src" "$SERVICE_DIR"; do
+        if [ -d "$search_dir" ]; then
+            found=$(grep -rl "from 'playwright'\|require('playwright')\|require(\"playwright\")" "$search_dir" --include="*.js" 2>/dev/null | grep -v node_modules | head -1)
+            if [ -n "$found" ]; then
+                SRC="$found"
+                break
+            fi
+        fi
+    done
+fi
+
+# Last resort: any .ts file in the tree
+if [ -z "$SRC" ]; then
+    SRC=$(find "$SERVICE_DIR" -name "*.ts" ! -path "*/node_modules/*" 2>/dev/null | head -1)
 fi
 
 if [ -z "$SRC" ]; then
-    echo "ERROR: Could not find TypeScript source file in $SERVICE_DIR"
-    echo "Files found:"
-    find "$SERVICE_DIR/src" -name "*.ts" 2>/dev/null | head -10
-    exit 1
+    echo ""
+    echo "WARNING: No TypeScript/JS source file found in $SERVICE_DIR"
+    echo "Listing all files:"
+    find "$SERVICE_DIR" -type f ! -path "*/node_modules/*" 2>/dev/null | head -20
+    echo ""
+    echo "Only package.json was patched. You will need to manually add stealth to the source."
+    echo "Typical change — replace:"
+    echo "  import { chromium } from 'playwright';"
+    echo "with:"
+    echo "  import { chromium } from 'playwright-extra';"
+    echo "  import StealthPlugin from 'puppeteer-extra-plugin-stealth';"
+    echo "  chromium.use(StealthPlugin());"
+    echo ""
+    # Still update deps and exit cleanly
+    SRC=""
 fi
-echo "    Found source: $SRC"
-cp "$SRC" "$SRC.bak" && echo "    Backed up $(basename $SRC)"
+if [ -n "$SRC" ]; then
+    echo "    Found source: $SRC"
+    cp "$SRC" "$SRC.bak" && echo "    Backed up $(basename $SRC)"
+fi
 
 # ── Add stealth plugin dependencies to package.json ──────────────────────────
 echo ""
@@ -94,7 +120,12 @@ PYEOF "$PKG"
 
 # ── Patch the TypeScript source ───────────────────────────────────────────────
 echo ""
-echo "==> Patching TypeScript source for stealth mode..."
+echo "==> Patching source for stealth mode..."
+
+if [ -z "$SRC" ]; then
+    echo "    Skipped (no source file found — patch manually, see instructions above)"
+    # jump to summary
+else
 
 SRC_CONTENT=$(cat "$SRC")
 
@@ -149,10 +180,10 @@ print("    Patched: replaced chromium import with stealth-wrapped version")
 PYEOF "$SRC"
 
     else
-        echo "    WARNING: Could not find 'from playwright' import in $SRC"
-        echo "    Manual patch needed — see README section at end of this script"
+        echo "    WARNING: Could not find playwright import in $SRC"
+        echo "    Manual patch: replace 'import { chromium } from playwright' with playwright-extra version"
     fi
-fi
+fi # end SRC check
 
 # ── Verify Dockerfile supports the new deps ───────────────────────────────────
 DOCKERFILE="$SERVICE_DIR/Dockerfile"

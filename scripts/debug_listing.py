@@ -252,6 +252,41 @@ async def test_browser():
         else:
             print("   Could not resolve zpid")
 
+    if zpid and "lat" in str(ac.text if ac.status_code == 200 else ""):
+        print("\n--- Zillow GetSearchPageState map API ---")
+        try:
+            meta_full = {}
+            if ac.status_code == 200:
+                for result in ac.json().get("results", []):
+                    m2 = result.get("metaData", {})
+                    if m2.get("zpid"):
+                        meta_full = m2
+                        break
+            lat2 = meta_full.get("lat")
+            lon2 = meta_full.get("lon") or meta_full.get("lng")
+            print(f"   lat={lat2}  lon={lon2}")
+            if lat2 and lon2:
+                import urllib.parse
+                search_state = {"pagination": {}, "mapBounds": {"west": lon2 - 0.006, "east": lon2 + 0.006, "south": lat2 - 0.004, "north": lat2 + 0.004}, "filterState": {"sortSelection": {"value": "globalrelevanceex"}, "isAllHomes": {"value": True}}, "isMapVisible": True, "isListVisible": True}
+                wants = {"cat1": ["listResults", "mapResults"], "cat2": ["total"]}
+                map_h = {**_nav, "Accept": "application/json", "Referer": "https://www.zillow.com/homes/for_sale/", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
+                await asyncio.sleep(jitter(1, 2))
+                mr = await s.get("https://www.zillow.com/search/GetSearchPageState.htm",
+                    params={"searchQueryState": json.dumps(search_state, separators=(",",":")), "wants": json.dumps(wants, separators=(",",":")), "requestId": 2},
+                    headers=map_h)
+                print(f"   Map API: HTTP {mr.status_code}  len={len(mr.text)}")
+                if mr.status_code == 200:
+                    mdata = mr.json()
+                    results2 = (mdata.get("cat1", {}).get("searchResults", {}).get("listResults", []) or
+                                mdata.get("cat1", {}).get("searchResults", {}).get("mapResults", []))
+                    print(f"   Results in bbox: {len(results2)}")
+                    for p in results2:
+                        print(f"   zpid={p.get('zpid')} price={p.get('price') or p.get('unformattedPrice')} beds={p.get('beds')} sqft={p.get('area')}")
+                else:
+                    print(f"   Body: {mr.text[:200]}")
+        except Exception as e:
+            print(f"   Map API error: {e}")
+
     print("\n--- Redfin with Chrome impersonation ---")
     async with AsyncSession(impersonate="chrome124") as s:
         print("1. Warming up homepage...")

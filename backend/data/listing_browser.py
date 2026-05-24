@@ -59,39 +59,46 @@ def _jitter(lo: float = 1.2, hi: float = 3.5) -> float:
 
 
 # ═══════════════════════════════════════════════════════
-#  Zillow
+#  Zillow — map search API (GetSearchPageState)
 # ═══════════════════════════════════════════════════════
 
 async def fetch_zillow_browser(address: str) -> dict | None:
+    """
+    Uses curl_cffi Chrome impersonation + session warmup to call
+    Zillow's map-search JSON API (GetSearchPageState.htm).
+
+    This endpoint is what powers Zillow's map view and returns full
+    listing JSON. It does NOT go through Datadome (no JS challenge).
+    We resolve lat/lon + zpid from autocomplete, then query a tight
+    bounding box to get the matching property's data.
+    """
     try:
         from curl_cffi.requests import AsyncSession
     except ImportError:
         logger.debug("curl_cffi not installed — skipping browser Zillow scraper")
         return None
 
-    slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
-
     try:
         async with AsyncSession(impersonate="chrome124") as s:
-            # ── Step 1: Land on homepage (get cookies: zguid, zgsession, etc.) ──
-            logger.debug("Zillow browser: warming up homepage")
+            # ── Step 1: Homepage warmup ───────────────────────────────────────
+            logger.debug("Zillow: warming up homepage session")
             await s.get("https://www.zillow.com/", headers=_NAV_HEADERS)
-            await asyncio.sleep(_jitter(2.0, 4.5))
+            await asyncio.sleep(_jitter(1.5, 3.0))
 
-            # ── Step 2: Autocomplete to resolve zpid ──────────────────────────
+            # ── Step 2: Autocomplete → zpid + lat/lon ─────────────────────────
             ac_headers = {
                 **_XHR_HEADERS,
                 "Referer": "https://www.zillow.com/",
                 "Sec-Fetch-Site": "same-site",
                 "Origin": "https://www.zillow.com",
             }
-            zpid = detail_url = None
+            zpid = lat = lon = detail_url = None
             for ac_url in [
                 "https://www.zillowstatic.com/autocomplete/v3/suggestions",
                 "https://www.zillow.com/autocomplete/v3/suggestions",
             ]:
+                await asyncio.sleep(_jitter(0.3, 0.9))
                 try:
-                    await asyncio.sleep(_jitter(0.4, 1.2))
                     ac = await s.get(
                         ac_url,
                         params={"q": address, "clientId": "homepage-render"},
@@ -100,14 +107,234 @@ async def fetch_zillow_browser(address: str) -> dict | None:
                     if ac.status_code == 200:
                         for r in ac.json().get("results", []):
                             meta = r.get("metaData", {})
-                            zpid = meta.get("zpid")
-                            detail_url = meta.get("detailUrl")
-                            if zpid:
+                            if meta.get("zpid"):
+                                zpid       = meta["zpid"]
+                                lat        = meta.get("lat")
+                                lon        = meta.get("lon") or meta.get("lng")
+                                detail_url = meta.get("detailUrl")
                                 break
                     if zpid:
                         break
                 except Exception as e:
-                    logger.debug(f"Zillow autocomplete attempt failed: {e}")
+                    logger.debug(f"Zillow autocomplete error: {e}")
+
+            if not zpid:
+                logger.debug("Zillow: no zpid from autocomplete")
+                return None
+
+            logger.debug(f"Zillow: zpid={zpid} lat={lat} lon={lon}")
+
+            # ── Step 3: Try map-search JSON API (no Datadome) ─────────────────
+            if lat and lon:
+                result = await _zillow_map_search(s, zpid, lat, lon)
+                if result:
+                    return result
+
+            # ── Step 4: Fallback — try property detail page with session cookies ─
+            slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+            prop_url = (
+                f"https://www.zillow.com{detail_url}" if detail_url and detail_url.startswith("/")
+                else f"https://www.zillow.com/homedetails/{slug}/{zpid}_zpid/"
+            )
+            await asyncio.sleep(_jitter(2.0, 4.0))
+            page = await s.get(
+                prop_url,
+                headers={**_NAV_HEADERS, "Referer": "https://www.zillow.com/",
+                          "Sec-Fetch-Site": "same-origin"},
+                allow_redirects=True,
+            )
+            if page.status_code == 200 and "__NEXT_DATA__" in page.text:
+                m = re.search(
+                    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+                    page.text, re.DOTALL,
+                )
+                if m:
+                    page_data = json.loads(m.group(1))
+                    gdp = page_data.get("props", {}).get("pageProps", {}).get("gdpClientCache")
+                    if gdp:
+                        for value in gdp.values():
+                            if isinstance(value, dict) and "property" in value:
+                                from backend.data.listing import _extract_zillow
+                                result = _extract_zillow(value["property"], str(page.url))
+                                if result:
+                                    result["source"] = "Zillow"
+                                return result
+
+            logger.debug(f"Zillow fallback page: HTTP {page.status_code}, blocked="
+                         f"{any(w in page.text.lower() for w in ['datadome','captcha','robot'])}")
+
+    except Exception as e:
+        logger.debug(f"Zillow browser scraper failed: {e}")
+
+    return None
+
+
+async def _zillow_map_search(s, zpid: int, lat: float, lon: float) -> dict | None:
+    """
+    Query Zillow's map-search JSON API with a tight bounding box around the
+    property. This endpoint returns full listing data as JSON and is NOT
+    protected by Datadome (it's the same API Zillow's map view calls).
+    """
+    import urllib.parse
+
+    # Tight bounding box: ~500m around the property
+    delta_lat = 0.004
+    delta_lon = 0.006
+    search_state = {
+        "pagination": {},
+        "mapBounds": {
+            "west":  lon - delta_lon,
+            "east":  lon + delta_lon,
+            "south": lat - delta_lat,
+            "north": lat + delta_lat,
+        },
+        "filterState": {
+            "sortSelection": {"value": "globalrelevanceex"},
+            "isAllHomes":    {"value": True},
+        },
+        "isMapVisible":  True,
+        "isListVisible": True,
+    }
+    wants = {"cat1": ["listResults", "mapResults"], "cat2": ["total"]}
+
+    map_headers = {
+        **_XHR_HEADERS,
+        "Accept":         "application/json",
+        "Referer":        "https://www.zillow.com/homes/for_sale/",
+        "Sec-Fetch-Site": "same-origin",
+    }
+
+    for request_id in [2, 3, 4]:
+        await asyncio.sleep(_jitter(0.8, 2.0))
+        try:
+            resp = await s.get(
+                "https://www.zillow.com/search/GetSearchPageState.htm",
+                params={
+                    "searchQueryState": json.dumps(search_state, separators=(",", ":")),
+                    "wants":            json.dumps(wants, separators=(",", ":")),
+                    "requestId":        request_id,
+                },
+                headers=map_headers,
+            )
+            logger.debug(f"Zillow map API: HTTP {resp.status_code} (requestId={request_id})")
+            if resp.status_code != 200:
+                continue
+
+            data = resp.json()
+            list_results = (
+                data.get("cat1", {})
+                    .get("searchResults", {})
+                    .get("listResults", [])
+            )
+            if not list_results:
+                # Try mapResults too
+                list_results = (
+                    data.get("cat1", {})
+                        .get("searchResults", {})
+                        .get("mapResults", [])
+                )
+
+            logger.debug(f"Zillow map API: {len(list_results)} results in bounding box")
+
+            # Find our property by zpid
+            target = None
+            for prop in list_results:
+                if str(prop.get("zpid", "")) == str(zpid):
+                    target = prop
+                    break
+
+            # Fall back to first result if only one in tight box
+            if not target and len(list_results) == 1:
+                target = list_results[0]
+
+            if not target:
+                logger.debug(f"Zillow map API: zpid {zpid} not in {len(list_results)} results")
+                continue
+
+            return _parse_map_result(target)
+
+        except Exception as e:
+            logger.debug(f"Zillow map API error (requestId={request_id}): {e}")
+
+    return None
+
+
+def _parse_map_result(prop: dict) -> dict | None:
+    """Extract listing fields from a Zillow map/list result object."""
+    price = prop.get("price") or prop.get("unformattedPrice")
+    if isinstance(price, str):
+        price = int(re.sub(r"[^\d]", "", price)) if re.sub(r"[^\d]", "", price) else None
+
+    beds  = prop.get("beds")
+    baths = prop.get("baths")
+    sqft  = prop.get("area") or prop.get("livingArea")
+    year  = prop.get("hdpData", {}).get("homeInfo", {}).get("yearBuilt") if prop.get("hdpData") else None
+
+    # hdpData.homeInfo has richer data
+    home_info = (prop.get("hdpData") or {}).get("homeInfo") or {}
+    if not year:
+        year = home_info.get("yearBuilt")
+    if not sqft:
+        sqft = home_info.get("livingArea")
+    if not baths:
+        baths = home_info.get("bathrooms")
+
+    listing_url = prop.get("detailUrl") or ""
+    if listing_url and not listing_url.startswith("http"):
+        listing_url = f"https://www.zillow.com{listing_url}"
+
+    status = prop.get("statusText") or prop.get("homeStatus") or home_info.get("homeStatus")
+    if status:
+        status = status.replace("_", " ").title()
+
+    if not any([price, beds, sqft]):
+        return None
+
+    result: dict = {
+        "price":       price,
+        "beds":        int(beds)   if beds  is not None else None,
+        "baths":       float(baths) if baths is not None else None,
+        "sqft":        int(sqft)   if sqft  is not None else None,
+        "year_built":  int(year)   if year  is not None else None,
+        "listing_url": listing_url,
+        "status":      status,
+        "photos":      [],
+        "source":      "Zillow",
+    }
+
+    # Grab a photo from the carousel
+    for img_key in ("carouselPhotos", "photos"):
+        photos = prop.get(img_key) or []
+        for p in photos[:4]:
+            url = p.get("url") or p.get("src") or (p if isinstance(p, str) else None)
+            if url:
+                result["photos"].append(url)
+        if result["photos"]:
+            break
+
+    # lot size, HOA, tax from hdpData
+    lot = home_info.get("lotAreaValue")
+    lot_unit = (home_info.get("lotAreaUnits") or "").lower()
+    if lot:
+        result["lot_size_sqft"] = int(float(lot) * 43560) if "acre" in lot_unit else int(float(lot))
+
+    hoa = home_info.get("monthlyHoaFee")
+    if hoa is not None:
+        result["hoa_fee_monthly"] = float(hoa)
+
+    tax = home_info.get("taxAnnualAmount")
+    if tax is not None:
+        result["tax_annual"] = float(tax)
+
+    dom = home_info.get("daysOnZillow") or prop.get("daysOnMarket")
+    if dom is not None:
+        result["days_on_market"] = int(dom)
+
+    pt = home_info.get("homeType") or prop.get("propertyType")
+    if pt:
+        result["property_type"] = str(pt).replace("_", " ").title()
+
+    return result
 
             if not zpid:
                 logger.debug("Zillow browser: could not resolve zpid")
