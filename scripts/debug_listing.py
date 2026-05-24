@@ -182,8 +182,111 @@ async def test_firecrawl():
             print(f"Scrape test: {type(e).__name__}: {e}")
 
 
+async def test_browser():
+    print("\n" + "="*60)
+    print("BROWSER IMPERSONATION (curl_cffi chrome124)")
+    print("="*60)
+    try:
+        from curl_cffi.requests import AsyncSession
+        print("curl_cffi available")
+    except ImportError:
+        print("curl_cffi NOT installed — run: pip install curl-cffi")
+        return
+
+    import random
+
+    def jitter(lo=1.2, hi=3.5):
+        return random.uniform(lo, hi)
+
+    _nav = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+        "DNT": "1",
+    }
+
+    print("\n--- Zillow with Chrome impersonation ---")
+    async with AsyncSession(impersonate="chrome124") as s:
+        print("1. Warming up homepage...")
+        r = await s.get("https://www.zillow.com/", headers=_nav)
+        print(f"   Homepage: HTTP {r.status_code}  cookies: {list(s.cookies.keys())[:6]}")
+        await asyncio.sleep(jitter(2, 4))
+
+        print("2. Autocomplete...")
+        ac_h = {**_nav, "Accept": "application/json", "Referer": "https://www.zillow.com/",
+                "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site"}
+        await asyncio.sleep(jitter(0.5, 1.5))
+        ac = await s.get("https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                         params={"q": ADDRESS, "clientId": "homepage-render"}, headers=ac_h)
+        print(f"   Autocomplete: HTTP {ac.status_code}")
+        zpid = detail_url = None
+        if ac.status_code == 200:
+            for result in ac.json().get("results", []):
+                meta = result.get("metaData", {})
+                zpid = meta.get("zpid")
+                detail_url = meta.get("detailUrl")
+                if zpid:
+                    print(f"   zpid={zpid}  detailUrl={detail_url}")
+                    break
+
+        if zpid:
+            slug = re.sub(r"[,\s]+", "-", ADDRESS.strip()).strip("-")
+            prop_url = (f"https://www.zillow.com{detail_url}" if detail_url and detail_url.startswith("/")
+                        else f"https://www.zillow.com/homedetails/{slug}/{zpid}_zpid/")
+            await asyncio.sleep(jitter(2, 4))
+            print(f"3. Fetching property page: {prop_url}")
+            page = await s.get(prop_url, headers={**_nav, "Referer": "https://www.zillow.com/",
+                                                  "Sec-Fetch-Site": "same-origin"}, allow_redirects=True)
+            print(f"   HTTP {page.status_code}  len={len(page.text)}")
+            has_data = "__NEXT_DATA__" in page.text
+            blocked = any(w in page.text.lower() for w in ["captcha", "robot", "datadome"])
+            print(f"   Has __NEXT_DATA__: {has_data}   Blocked: {blocked}")
+            if has_data:
+                print("   SUCCESS - property data available!")
+        else:
+            print("   Could not resolve zpid")
+
+    print("\n--- Redfin with Chrome impersonation ---")
+    async with AsyncSession(impersonate="chrome124") as s:
+        print("1. Warming up homepage...")
+        r = await s.get("https://www.redfin.com/", headers=_nav)
+        print(f"   Homepage: HTTP {r.status_code}  cookies: {list(s.cookies.keys())[:6]}")
+        await asyncio.sleep(jitter(2, 4))
+
+        print("2. Autocomplete API...")
+        ac_h = {**_nav, "Accept": "application/json", "Referer": "https://www.redfin.com/",
+                "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
+        await asyncio.sleep(jitter(0.8, 2))
+        ac = await s.get("https://www.redfin.com/stingray/do/query-location-autocomplete",
+                         params={"al": 1, "location": ADDRESS, "start": 0, "count": 5, "v": 2},
+                         headers=ac_h)
+        print(f"   Autocomplete: HTTP {ac.status_code}  len={len(ac.text)}")
+        if ac.status_code == 200:
+            try:
+                data = json.loads(ac.text.lstrip("{}&&").strip())
+                sections = (data.get("payload") or {}).get("sections", [])
+                for section in sections:
+                    for row in section.get("rows", []):
+                        if str(row.get("type")) == "1":
+                            print(f"   FOUND: propertyId={row.get('id')}  url={row.get('url')}")
+            except Exception as e:
+                print(f"   Parse error: {e}")
+                print(f"   Raw: {ac.text[:200]}")
+        else:
+            print(f"   Body: {ac.text[:200]}")
+
+
 async def main():
     print(f"Diagnosing listing data for: {ADDRESS!r}")
+    # Run browser test first (sequential — needs warmup delays)
+    await test_browser()
+    # Run rest in parallel
     await asyncio.gather(
         test_zillow(),
         test_redfin(),

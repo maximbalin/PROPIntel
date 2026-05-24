@@ -120,26 +120,33 @@ async def _firecrawl_scrape(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
+    # Actions that mimic a user reading the page: wait → scroll → wait → scroll
+    _actions = [
+        {"type": "wait",   "milliseconds": 2500},
+        {"type": "scroll", "direction": "down", "amount": 400},
+        {"type": "wait",   "milliseconds": 1500},
+        {"type": "scroll", "direction": "down", "amount": 600},
+        {"type": "wait",   "milliseconds": 1000},
+    ]
+
     # Try newer extract format first (Firecrawl v0.5+), then fall back to jsonOptions
     payloads = [
         {
             "url": url,
             "formats": ["extract"],
-            "extract": {
-                "schema": PROPERTY_SCHEMA,
-                "prompt": prompt,
-            },
-            "waitFor": 3000,
+            "extract": {"schema": PROPERTY_SCHEMA, "prompt": prompt},
+            "actions": _actions,
+            "waitFor": 6000,
+            "timeout": 60000,
             "onlyMainContent": True,
         },
         {
             "url": url,
             "formats": ["json"],
-            "jsonOptions": {
-                "schema": PROPERTY_SCHEMA,
-                "prompt": prompt,
-            },
-            "waitFor": 3000,
+            "jsonOptions": {"schema": PROPERTY_SCHEMA, "prompt": prompt},
+            "actions": _actions,
+            "waitFor": 6000,
+            "timeout": 60000,
             "onlyMainContent": True,
         },
     ]

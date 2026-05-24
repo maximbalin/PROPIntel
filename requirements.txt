@@ -6,6 +6,7 @@ langchain-core
 asyncpg
 redis
 httpx
+curl-cffi
 geopy
 pydantic
 pydantic-settings

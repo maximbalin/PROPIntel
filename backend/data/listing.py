@@ -55,7 +55,7 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
             logger.debug(f"{name} fetch failed: {e}")
         return None
 
-    # ── Try Rentcast API first (reliable), then Firecrawl + direct scrapers ──
+    # ── Try all sources in parallel ──────────────────────────────
     async def _rentcast():
         try:
             from backend.data.listing_rentcast import get_listing_rentcast
@@ -64,13 +64,34 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
             logger.debug(f"Rentcast failed: {e}")
         return None
 
-    rentcast_coro  = _safe(_rentcast(), "Rentcast")
-    firecrawl_coro = _safe(_firecrawl(address), "Realtor.com/Zillow/Redfin (Firecrawl)")
-    redfin_coro    = _safe(_fetch_redfin(address), "Redfin")
-    zillow_coro    = _safe(_fetch_zillow(address), "Zillow")
+    async def _browser_zillow():
+        try:
+            from backend.data.listing_browser import fetch_zillow_browser
+            return await fetch_zillow_browser(address)
+        except Exception as e:
+            logger.debug(f"Browser Zillow failed: {e}")
+        return None
 
-    results = await asyncio.gather(rentcast_coro, firecrawl_coro, redfin_coro, zillow_coro,
-                                   return_exceptions=True)
+    async def _browser_redfin():
+        try:
+            from backend.data.listing_browser import fetch_redfin_browser
+            return await fetch_redfin_browser(address)
+        except Exception as e:
+            logger.debug(f"Browser Redfin failed: {e}")
+        return None
+
+    rentcast_coro       = _safe(_rentcast(), "Rentcast")
+    browser_zillow_coro = _safe(_browser_zillow(), "Zillow")
+    browser_redfin_coro = _safe(_browser_redfin(), "Redfin")
+    firecrawl_coro      = _safe(_firecrawl(address), "Realtor.com/Zillow/Redfin (Firecrawl)")
+    redfin_coro         = _safe(_fetch_redfin(address), "Redfin (direct)")
+    zillow_coro         = _safe(_fetch_zillow(address), "Zillow (direct)")
+
+    results = await asyncio.gather(
+        rentcast_coro, browser_zillow_coro, browser_redfin_coro,
+        firecrawl_coro, redfin_coro, zillow_coro,
+        return_exceptions=True,
+    )
 
     valid = [r for r in results if isinstance(r, dict) and r and not r.get("error")]
     if not valid:
