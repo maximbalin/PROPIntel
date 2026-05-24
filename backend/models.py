@@ -90,6 +90,7 @@ class ListingData(BaseModel):
     description:       Optional[str]   = None
     listing_url:       Optional[str]   = None
     external_links:    Optional[dict]  = None
+    links_only:        bool            = False
     photos:            List[str]       = []
     source:            Optional[str]   = None
     error:             Optional[str]   = None

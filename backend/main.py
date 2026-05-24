@@ -869,6 +869,7 @@ async def analyze(
             description     =lr.get("description"),
             listing_url     =lr.get("listing_url"),
             external_links  =lr.get("external_links"),
+            links_only      =bool(lr.get("_links_only")),
             photos          =lr.get("photos", []),
             source          =lr.get("source"),
             # Assessor public records
@@ -888,6 +889,31 @@ async def analyze(
         )
     elif isinstance(listing_raw, dict) and listing_raw.get("error"):
         listing_data = ListingData(error=listing_raw["error"])
+
+    # Scraper returned nothing but assessor public records are available — show them
+    if listing_data is None and assessor:
+        listing_data = ListingData(
+            beds            =assessor.get("beds"),
+            baths           =assessor.get("baths"),
+            sqft            =assessor.get("sqft"),
+            year_built      =assessor.get("year_built"),
+            property_type   =assessor.get("property_type"),
+            lot_size_sqft   =assessor.get("lot_size_sqft"),
+            heating_cooling =assessor.get("heat_type"),
+            assessed_total    =assessor.get("assessed_total"),
+            assessed_building =assessor.get("assessed_building"),
+            assessed_land     =assessor.get("assessed_land"),
+            assessment_year   =assessor.get("assessment_year"),
+            last_sale_price   =assessor.get("last_sale_price"),
+            last_sale_date    =assessor.get("last_sale_date"),
+            style             =assessor.get("style"),
+            heat_type         =assessor.get("heat_type"),
+            fuel_type         =assessor.get("fuel_type"),
+            total_rooms       =assessor.get("total_rooms"),
+            stories           =assessor.get("stories"),
+            owner             =assessor.get("owner"),
+            assessor_source   =assessor.get("source"),
+        )
 
     response = AnalyzeResponse(
         assessment_id=assessment_id,

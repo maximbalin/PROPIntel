@@ -118,9 +118,9 @@ function renderListingData(listing) {
 
   if (empty) empty.classList.add('hidden');
 
-  // Links-only fallback: show jump-to buttons for all three sites
-  if (listing._links_only) {
-    if (srcSpan) srcSpan.textContent = '';
+  // Links-only fallback: show jump-to buttons for all three sites + any assessor data
+  if (listing.links_only) {
+    if (srcSpan) srcSpan.textContent = listing.assessor_source ? `Public records: ${listing.assessor_source}` : '';
     const links = listing.external_links || {};
     const statusBadge = listing.status
       ? `<span class="listing-status-badge listing-status-${listing.status.toLowerCase().replace(/\s+/g,'-')}">${listing.status}</span>`
@@ -130,13 +130,28 @@ function renderListingData(listing) {
       links.redfin   && `<a class="listing-ext-btn redfin-btn"   href="${links.redfin}"   target="_blank" rel="noopener">Redfin</a>`,
       links.realtor  && `<a class="listing-ext-btn realtor-btn"  href="${links.realtor}"  target="_blank" rel="noopener">Realtor.com</a>`,
     ].filter(Boolean).join('');
+    // Build assessor summary if available
+    const specs = [];
+    if (listing.beds)          specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🛏</span>${listing.beds} bed${listing.beds !== 1 ? 's' : ''}</span>`);
+    if (listing.baths)         specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🚿</span>${listing.baths} bath${listing.baths !== 1 ? 's' : ''}</span>`);
+    if (listing.sqft)          specs.push(`<span class="listing-spec"><span class="listing-spec-icon">📐</span>${listing.sqft.toLocaleString()} sqft</span>`);
+    if (listing.year_built)    specs.push(`<span class="listing-spec"><span class="listing-spec-icon">🏗</span>Built ${listing.year_built}</span>`);
+    const asr = [];
+    if (listing.assessed_total)  asr.push(`<span class="listing-fin-item asr-item"><strong>Assessed</strong> $${listing.assessed_total.toLocaleString()}${listing.assessment_year ? ` (${listing.assessment_year})` : ''}</span>`);
+    if (listing.last_sale_price) asr.push(`<span class="listing-fin-item asr-item"><strong>Last sale</strong> $${listing.last_sale_price.toLocaleString()}${listing.last_sale_date ? ` (${listing.last_sale_date})` : ''}</span>`);
+    if (listing.style)           asr.push(`<span class="listing-fin-item asr-item"><strong>Style</strong> ${listing.style}</span>`);
+    if (listing.heat_type)       asr.push(`<span class="listing-fin-item asr-item"><strong>Heat</strong> ${listing.heat_type}</span>`);
+    if (listing.owner)           asr.push(`<span class="listing-fin-item asr-item"><strong>Owner</strong> ${listing.owner}</span>`);
+    const specsHtml = specs.length ? `<div class="listing-specs" style="margin-top:.75rem">${specs.join('')}</div>` : '';
+    const asrHtml   = asr.length   ? `<div class="listing-fin-row asr-row">${asr.join('')}</div>` : '';
     card.innerHTML = `
       <div class="listing-links-only">
         <div class="listing-links-header">
           ${statusBadge}
-          <span class="listing-links-note">Live listing data requires a paid data API. View directly:</span>
+          <span class="listing-links-note">Live listing data unavailable. View on:</span>
         </div>
         <div class="listing-ext-btns">${btnHtml}</div>
+        ${specsHtml}${asrHtml}
       </div>`;
     return;
   }
