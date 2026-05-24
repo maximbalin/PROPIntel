@@ -113,21 +113,35 @@ def _get_endpoint(settings) -> tuple[str, str]:
 
 
 async def _firecrawl_scrape(
-    url: str, prompt: str, endpoint: str, api_key: str, timeout: float = 45.0
+    url: str, prompt: str, endpoint: str, api_key: str, timeout: float = 75.0
 ) -> dict | None:
     """POST to Firecrawl /v1/scrape with AI extraction. Tries newer extract format, falls back to json."""
     headers = {"Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    # Actions that mimic a user reading the page: wait → scroll → wait → scroll
+    # Actions that mimic a user arriving and slowly reading a property page
     _actions = [
-        {"type": "wait",   "milliseconds": 2500},
+        {"type": "wait",   "milliseconds": 3000},
+        {"type": "scroll", "direction": "down", "amount": 300},
+        {"type": "wait",   "milliseconds": 2000},
         {"type": "scroll", "direction": "down", "amount": 400},
         {"type": "wait",   "milliseconds": 1500},
-        {"type": "scroll", "direction": "down", "amount": 600},
+        {"type": "scroll", "direction": "down", "amount": 300},
         {"type": "wait",   "milliseconds": 1000},
     ]
+
+    # Pass Chrome-like headers to the browser Firecrawl launches
+    _browser_headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+    }
 
     # Try newer extract format first (Firecrawl v0.5+), then fall back to jsonOptions
     payloads = [
@@ -136,8 +150,9 @@ async def _firecrawl_scrape(
             "formats": ["extract"],
             "extract": {"schema": PROPERTY_SCHEMA, "prompt": prompt},
             "actions": _actions,
-            "waitFor": 6000,
-            "timeout": 60000,
+            "headers": _browser_headers,
+            "waitFor": 8000,
+            "timeout": 70000,
             "onlyMainContent": True,
         },
         {
@@ -145,8 +160,9 @@ async def _firecrawl_scrape(
             "formats": ["json"],
             "jsonOptions": {"schema": PROPERTY_SCHEMA, "prompt": prompt},
             "actions": _actions,
-            "waitFor": 6000,
-            "timeout": 60000,
+            "headers": _browser_headers,
+            "waitFor": 8000,
+            "timeout": 70000,
             "onlyMainContent": True,
         },
     ]
