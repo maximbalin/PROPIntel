@@ -107,18 +107,38 @@ function renderListingData(listing) {
   const empty   = document.getElementById('listingEmpty');
   const srcSpan = document.getElementById('listingSectionSources');
 
-  const hasAnyData = listing && !listing.error && (
-    listing.price || listing.beds || listing.sqft || listing.description ||
-    listing.listing_url || listing.year_built || listing.status
-  );
-
-  if (!hasAnyData) {
+  if (!listing || listing.error) {
     card.innerHTML = '';
     if (empty) empty.classList.remove('hidden');
     if (srcSpan) srcSpan.textContent = '';
     return;
   }
+
   if (empty) empty.classList.add('hidden');
+
+  // Links-only fallback: show jump-to buttons for all three sites
+  if (listing._links_only) {
+    if (srcSpan) srcSpan.textContent = '';
+    const links = listing.external_links || {};
+    const statusBadge = listing.status
+      ? `<span class="listing-status-badge listing-status-${listing.status.toLowerCase().replace(/\s+/g,'-')}">${listing.status}</span>`
+      : '';
+    const btnHtml = [
+      links.zillow   && `<a class="listing-ext-btn zillow-btn"   href="${links.zillow}"   target="_blank" rel="noopener">Zillow</a>`,
+      links.redfin   && `<a class="listing-ext-btn redfin-btn"   href="${links.redfin}"   target="_blank" rel="noopener">Redfin</a>`,
+      links.realtor  && `<a class="listing-ext-btn realtor-btn"  href="${links.realtor}"  target="_blank" rel="noopener">Realtor.com</a>`,
+    ].filter(Boolean).join('');
+    card.innerHTML = `
+      <div class="listing-links-only">
+        <div class="listing-links-header">
+          ${statusBadge}
+          <span class="listing-links-note">Live listing data requires a paid data API. View directly:</span>
+        </div>
+        <div class="listing-ext-btns">${btnHtml}</div>
+      </div>`;
+    return;
+  }
+
   if (srcSpan) srcSpan.textContent = listing.source ? `via ${listing.source}` : '';
 
   const photoHtml = (listing.photos && listing.photos.length)

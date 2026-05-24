@@ -425,6 +425,32 @@ body {
   color: var(--accent); text-decoration: none;
 }
 .listing-link:hover { text-decoration: underline; }
+
+/* Links-only fallback */
+.listing-links-only {
+  padding: 1rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.listing-links-header {
+  display: flex; align-items: center; gap: 0.75rem;
+  margin-bottom: 0.75rem; flex-wrap: wrap;
+}
+.listing-links-note {
+  font-size: 0.8125rem; color: var(--text-muted);
+}
+.listing-ext-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.listing-ext-btn {
+  padding: 0.45rem 1rem; border-radius: 6px;
+  font-size: 0.8125rem; font-weight: 600;
+  text-decoration: none; transition: opacity .15s;
+}
+.listing-ext-btn:hover { opacity: 0.85; }
+.zillow-btn  { background: #006aff; color: #fff; }
+.redfin-btn  { background: #cc0000; color: #fff; }
+.realtor-btn { background: #d9232e; color: #fff; }
+
 @media (max-width: 600px) {
   .listing-inner { flex-direction: column; }
   .listing-photo-strip { width: 100%; height: 160px; }

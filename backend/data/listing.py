@@ -74,7 +74,8 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
 
     valid = [r for r in results if isinstance(r, dict) and r and not r.get("error")]
     if not valid:
-        return {"error": "Property listing not found on Realtor.com, Zillow, or Redfin"}
+        # No detailed data — build a links-only result so the UI can show jump-to buttons
+        return await _build_links_fallback(address)
 
     # Pick result with the most populated fields
     def _richness(r):
@@ -82,6 +83,88 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
         return sum(1 for k, v in r.items() if k not in skip and v is not None)
 
     return max(valid, key=_richness)
+
+
+async def _build_links_fallback(address: str) -> dict:
+    """
+    When all scrapers fail, resolve the Zillow zpid (if possible) to build
+    a direct property-page link; construct Redfin and Realtor.com search links.
+    Returns a dict with no price/bed data but with listing_url + external_links.
+    """
+    slug_z = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+    slug_r = re.sub(r"[,\s]+", "-", address.strip()).strip("-").lower()
+
+    # Try Zillow autocomplete for zpid → precise property URL
+    zillow_url = f"https://www.zillow.com/homes/{slug_z}_rb/"
+    status = None
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers=_ZILLOW_HEADERS) as client:
+            for ac_url in [
+                "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                "https://www.zillow.com/autocomplete/v3/suggestions",
+            ]:
+                try:
+                    ac = await client.get(ac_url, params={"q": address, "clientId": "homepage-render"})
+                    if ac.status_code == 200:
+                        for result in ac.json().get("results", []):
+                            meta = result.get("metaData", {})
+                            zpid = meta.get("zpid")
+                            addr_type = meta.get("addressType", "")
+                            detail_url = meta.get("detailUrl")
+                            if zpid:
+                                if detail_url:
+                                    zillow_url = (f"https://www.zillow.com{detail_url}"
+                                                  if detail_url.startswith("/") else detail_url)
+                                else:
+                                    zillow_url = f"https://www.zillow.com/homedetails/{slug_z}/{zpid}_zpid/"
+                                if "forsale" in addr_type:
+                                    status = "For Sale"
+                                elif "sold" in addr_type:
+                                    status = "Recently Sold"
+                                break
+                    if "zpid" in zillow_url:
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    parsed = _parse_address_parts(address)
+    city, state, street = parsed["city"], parsed["state"], parsed["street"]
+
+    # Redfin search URL
+    city_slug = city.lower().replace(" ", "-") if city else ""
+    redfin_url = (f"https://www.redfin.com/{state}/{city_slug}/filter/property-type=house"
+                  if city and state else "https://www.redfin.com/")
+
+    # Realtor.com search URL
+    city_state = f"{city.replace(' ', '-')}_{state}" if city and state else ""
+    keywords = quote_plus(street) if street else ""
+    realtor_url = (f"https://www.realtor.com/realestateandhomes-search/{city_state}?keywords={keywords}"
+                   if city_state else "https://www.realtor.com/")
+
+    return {
+        "listing_url": zillow_url,
+        "external_links": {
+            "zillow": zillow_url,
+            "redfin": redfin_url,
+            "realtor": realtor_url,
+        },
+        "status": status,
+        "photos": [],
+        "source": "links",
+        "_links_only": True,
+    }
+
+
+def _parse_address_parts(address: str) -> dict:
+    parts = [p.strip() for p in address.split(",")]
+    street = parts[0] if parts else address
+    city = parts[1].strip() if len(parts) > 1 else ""
+    state_zip = parts[2].strip() if len(parts) > 2 else ""
+    m = re.match(r"([A-Z]{2})", state_zip)
+    state = m.group(1) if m else ""
+    return {"street": street, "city": city, "state": state}
 
 
 # ── Firecrawl (AI-powered extraction) ─────────────────────────
