@@ -78,7 +78,7 @@ class FreeDataFetcher:
             return float(results[0]["lat"]), float(results[0]["lon"])
 
     async def fetch_all(self, lat: float, lon: float, force_refresh: bool = False) -> dict:
-        cache_key = f"raw:v8:{lat:.4f}:{lon:.4f}"
+        cache_key = f"raw:v9:{lat:.4f}:{lon:.4f}"
         redis = await get_redis()
 
         if not force_refresh:

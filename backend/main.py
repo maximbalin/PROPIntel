@@ -676,7 +676,7 @@ async def flush_cache(address: str = Query(..., description="Full property addre
     except ValueError:
         raise HTTPException(status_code=422, detail="Address not found")
 
-    raw_key  = f"raw:v8:{lat:.4f}:{lon:.4f}"
+    raw_key  = f"raw:v9:{lat:.4f}:{lon:.4f}"
     ass_keys = [
         f"assessment:v13:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
         for mode in ("buyer", "investor")
