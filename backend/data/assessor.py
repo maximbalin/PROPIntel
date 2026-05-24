@@ -33,6 +33,7 @@ async def get_assessor_data(lat: float, lon: float) -> dict:
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
+            # Search within 40 m so a road-centroid geocode still hits the adjacent parcel
             resp = await client.get(
                 MASSGIS_URL,
                 params={
@@ -40,6 +41,8 @@ async def get_assessor_data(lat: float, lon: float) -> dict:
                     "geometryType":  "esriGeometryPoint",
                     "inSR":          "4326",
                     "spatialRel":    "esriSpatialRelIntersects",
+                    "distance":      40,
+                    "units":         "esriSRUnit_Meter",
                     "outFields":     "*",
                     "returnGeometry":"false",
                     "f":             "json",
@@ -49,7 +52,7 @@ async def get_assessor_data(lat: float, lon: float) -> dict:
             resp.raise_for_status()
             features = resp.json().get("features", [])
             if not features:
-                logger.debug("MassGIS: no parcel at this location")
+                logger.debug("MassGIS: no parcel within 40 m of this location")
                 return {}
             return _parse(features[0].get("attributes", {}))
     except Exception as e:

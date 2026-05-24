@@ -676,9 +676,9 @@ async def flush_cache(address: str = Query(..., description="Full property addre
     except ValueError:
         raise HTTPException(status_code=422, detail="Address not found")
 
-    raw_key  = f"raw:v7:{lat:.4f}:{lon:.4f}"
+    raw_key  = f"raw:v8:{lat:.4f}:{lon:.4f}"
     ass_keys = [
-        f"assessment:v12:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
+        f"assessment:v13:{hashlib.md5(address.encode()).hexdigest()}:{mode}"
         for mode in ("buyer", "investor")
     ]
     deleted = 0
@@ -695,7 +695,7 @@ async def analyze(
 ):
     settings = get_settings()
 
-    cache_key = f"assessment:v12:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
+    cache_key = f"assessment:v13:{hashlib.md5(req.address.encode()).hexdigest()}:{req.mode}"
     redis = await get_redis()
     if not force_refresh:
         cached = await redis.get(cache_key)
