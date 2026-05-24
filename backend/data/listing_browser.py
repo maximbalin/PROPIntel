@@ -450,3 +450,178 @@ async def fetch_redfin_browser(address: str) -> dict | None:
         logger.debug(f"Redfin browser scraper failed: {e}")
 
     return None
+
+
+# ═══════════════════════════════════════════════════════
+#  Zillow — Playwright stealth (executes JS challenges)
+# ═══════════════════════════════════════════════════════
+
+async def fetch_zillow_playwright(address: str) -> dict | None:
+    """
+    Playwright + playwright-stealth: runs real Chromium with JS-detection patches.
+
+    Unlike curl_cffi (which only spoofs TLS), Playwright actually *executes*
+    Datadome's JavaScript challenge. The stealth plugin removes webdriver signals,
+    fakes navigator.plugins, patches canvas fingerprinting, etc., so the challenge
+    is solved and the property page renders normally.
+
+    Falls back gracefully if playwright / playwright-stealth are not installed.
+    Run once after install: playwright install chromium
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        logger.debug("playwright not installed — skipping; run: pip install playwright && playwright install chromium")
+        return None
+
+    stealth_fn = None
+    try:
+        from playwright_stealth import stealth_async as stealth_fn
+    except ImportError:
+        logger.debug("playwright-stealth not installed — running without stealth patches")
+
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-dev-shm-usage",
+                ],
+            )
+            try:
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1920, "height": 1080},
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                )
+                page = await context.new_page()
+
+                if stealth_fn:
+                    await stealth_fn(page)
+                    logger.debug("Playwright: stealth patches applied")
+
+                # ── Step 1: Homepage warmup ───────────────────────────────
+                logger.debug("Playwright: loading Zillow homepage")
+                await page.goto("https://www.zillow.com/", wait_until="domcontentloaded")
+                await asyncio.sleep(_jitter(2.0, 4.0))
+
+                # ── Step 2: Autocomplete → zpid + lat/lon ─────────────────
+                zpid = lat = lon = detail_url = None
+                try:
+                    ac = await page.request.get(
+                        "https://www.zillowstatic.com/autocomplete/v3/suggestions",
+                        params={"q": address, "clientId": "homepage-render"},
+                    )
+                    if ac.ok:
+                        for r in (await ac.json()).get("results", []):
+                            meta = r.get("metaData", {})
+                            if meta.get("zpid"):
+                                zpid       = meta["zpid"]
+                                lat        = meta.get("lat")
+                                lon        = meta.get("lon") or meta.get("lng")
+                                detail_url = meta.get("detailUrl")
+                                break
+                except Exception as e:
+                    logger.debug(f"Playwright autocomplete error: {e}")
+
+                if not zpid:
+                    logger.debug("Playwright: no zpid from autocomplete")
+                    return None
+
+                logger.debug(f"Playwright: zpid={zpid} lat={lat} lon={lon}")
+
+                # ── Step 3: Try map search API first (no Datadome) ────────
+                if lat and lon:
+                    try:
+                        search_state = {
+                            "pagination": {},
+                            "mapBounds": {
+                                "west": lon - 0.006, "east": lon + 0.006,
+                                "south": lat - 0.004, "north": lat + 0.004,
+                            },
+                            "filterState": {
+                                "sortSelection": {"value": "globalrelevanceex"},
+                                "isAllHomes": {"value": True},
+                            },
+                            "isMapVisible": True, "isListVisible": True,
+                        }
+                        wants = {"cat1": ["listResults", "mapResults"], "cat2": ["total"]}
+                        await asyncio.sleep(_jitter(0.8, 1.5))
+                        mr = await page.request.get(
+                            "https://www.zillow.com/search/GetSearchPageState.htm",
+                            params={
+                                "searchQueryState": json.dumps(search_state, separators=(",", ":")),
+                                "wants": json.dumps(wants, separators=(",", ":")),
+                                "requestId": 2,
+                            },
+                        )
+                        logger.debug(f"Playwright map API: HTTP {mr.status}")
+                        if mr.ok:
+                            data = await mr.json()
+                            list_results = (
+                                data.get("cat1", {}).get("searchResults", {}).get("listResults", [])
+                                or data.get("cat1", {}).get("searchResults", {}).get("mapResults", [])
+                            )
+                            target = next(
+                                (p for p in list_results if str(p.get("zpid", "")) == str(zpid)),
+                                list_results[0] if len(list_results) == 1 else None,
+                            )
+                            if target:
+                                result = _parse_map_result(target)
+                                if result:
+                                    return result
+                    except Exception as e:
+                        logger.debug(f"Playwright map API error: {e}")
+
+                # ── Step 4: Navigate to property detail page ──────────────
+                slug = re.sub(r"[,\s]+", "-", address.strip()).strip("-")
+                prop_url = (
+                    f"https://www.zillow.com{detail_url}" if detail_url and detail_url.startswith("/")
+                    else f"https://www.zillow.com/homedetails/{slug}/{zpid}_zpid/"
+                )
+                await asyncio.sleep(_jitter(1.5, 3.0))
+                logger.debug(f"Playwright: navigating to {prop_url}")
+                await page.goto(prop_url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(_jitter(3.0, 5.0))
+
+                content = await page.content()
+                if "__NEXT_DATA__" not in content:
+                    is_blocked = any(w in content.lower() for w in
+                                     ["captcha", "robot", "recaptcha", "are you human"])
+                    logger.debug(f"Playwright: no __NEXT_DATA__ (hard_block={is_blocked}, len={len(content)})")
+                    return None
+
+                m = re.search(
+                    r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+                    content, re.DOTALL,
+                )
+                if not m:
+                    return None
+
+                page_data = json.loads(m.group(1))
+                gdp = page_data.get("props", {}).get("pageProps", {}).get("gdpClientCache")
+                if not gdp:
+                    return None
+
+                for value in gdp.values():
+                    if isinstance(value, dict) and "property" in value:
+                        from backend.data.listing import _extract_zillow
+                        result = _extract_zillow(value["property"], prop_url)
+                        if result:
+                            result["source"] = "Zillow"
+                        return result
+
+            finally:
+                await browser.close()
+
+    except Exception as e:
+        logger.debug(f"Playwright Zillow scraper failed: {e}")
+
+    return None

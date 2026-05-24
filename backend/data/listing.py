@@ -80,16 +80,25 @@ async def get_listing_data(address: str, lat: float = None, lon: float = None) -
             logger.debug(f"Browser Redfin failed: {e}")
         return None
 
-    rentcast_coro       = _safe(_rentcast(), "Rentcast")
-    browser_zillow_coro = _safe(_browser_zillow(), "Zillow")
-    browser_redfin_coro = _safe(_browser_redfin(), "Redfin")
-    firecrawl_coro      = _safe(_firecrawl(address), "Realtor.com/Zillow/Redfin (Firecrawl)")
-    redfin_coro         = _safe(_fetch_redfin(address), "Redfin (direct)")
-    zillow_coro         = _safe(_fetch_zillow(address), "Zillow (direct)")
+    async def _playwright_zillow():
+        try:
+            from backend.data.listing_browser import fetch_zillow_playwright
+            return await fetch_zillow_playwright(address)
+        except Exception as e:
+            logger.debug(f"Playwright Zillow failed: {e}")
+        return None
+
+    rentcast_coro          = _safe(_rentcast(), "Rentcast")
+    browser_zillow_coro    = _safe(_browser_zillow(), "Zillow (curl_cffi)")
+    browser_redfin_coro    = _safe(_browser_redfin(), "Redfin (curl_cffi)")
+    playwright_zillow_coro = _safe(_playwright_zillow(), "Zillow (playwright)")
+    firecrawl_coro         = _safe(_firecrawl(address), "Realtor.com/Zillow/Redfin (Firecrawl)")
+    redfin_coro            = _safe(_fetch_redfin(address), "Redfin (direct)")
+    zillow_coro            = _safe(_fetch_zillow(address), "Zillow (direct)")
 
     results = await asyncio.gather(
         rentcast_coro, browser_zillow_coro, browser_redfin_coro,
-        firecrawl_coro, redfin_coro, zillow_coro,
+        playwright_zillow_coro, firecrawl_coro, redfin_coro, zillow_coro,
         return_exceptions=True,
     )
 
