@@ -510,6 +510,7 @@ async def fetch_zillow_playwright(address: str) -> dict | None:
             browser = await pw.chromium.launch(**launch_kwargs)
             try:
                 context = await browser.new_context(
+                    ignore_https_errors=True,  # snap Chromium has its own cert store
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
