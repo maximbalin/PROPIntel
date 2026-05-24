@@ -842,26 +842,49 @@ async def analyze(
 
     assessment_id = str(uuid.uuid4())
 
+    # Assessor data from fetcher (MassGIS public records, MA only)
+    assessor = raw_data.get("assessor") or {}
+
     listing_data = None
     if isinstance(listing_raw, dict) and not listing_raw.get("error"):
+        lr = listing_raw
+        # Merge assessor fields for any gaps in live listing data
+        def _asr(key):
+            return lr.get(key) or assessor.get(key)
+
         listing_data = ListingData(
-            price           =listing_raw.get("price"),
-            beds            =listing_raw.get("beds"),
-            baths           =listing_raw.get("baths"),
-            sqft            =listing_raw.get("sqft"),
-            year_built      =listing_raw.get("year_built"),
-            property_type   =listing_raw.get("property_type"),
-            lot_size_sqft   =listing_raw.get("lot_size_sqft"),
-            hoa_fee_monthly =listing_raw.get("hoa_fee_monthly"),
-            tax_annual      =listing_raw.get("tax_annual"),
-            status          =listing_raw.get("status"),
-            days_on_market  =listing_raw.get("days_on_market"),
-            garage_spaces   =listing_raw.get("garage_spaces"),
-            heating_cooling =listing_raw.get("heating_cooling"),
-            description     =listing_raw.get("description"),
-            listing_url     =listing_raw.get("listing_url"),
-            photos          =listing_raw.get("photos", []),
-            source          =listing_raw.get("source"),
+            price           =lr.get("price"),
+            beds            =_asr("beds"),
+            baths           =_asr("baths"),
+            sqft            =_asr("sqft"),
+            year_built      =_asr("year_built"),
+            property_type   =_asr("property_type"),
+            lot_size_sqft   =_asr("lot_size_sqft"),
+            hoa_fee_monthly =lr.get("hoa_fee_monthly"),
+            tax_annual      =lr.get("tax_annual"),
+            status          =lr.get("status"),
+            days_on_market  =lr.get("days_on_market"),
+            garage_spaces   =lr.get("garage_spaces"),
+            heating_cooling =lr.get("heating_cooling") or assessor.get("heat_type"),
+            description     =lr.get("description"),
+            listing_url     =lr.get("listing_url"),
+            external_links  =lr.get("external_links"),
+            photos          =lr.get("photos", []),
+            source          =lr.get("source"),
+            # Assessor public records
+            assessed_total    =assessor.get("assessed_total"),
+            assessed_building =assessor.get("assessed_building"),
+            assessed_land     =assessor.get("assessed_land"),
+            assessment_year   =assessor.get("assessment_year"),
+            last_sale_price   =assessor.get("last_sale_price"),
+            last_sale_date    =assessor.get("last_sale_date"),
+            style             =assessor.get("style"),
+            heat_type         =assessor.get("heat_type"),
+            fuel_type         =assessor.get("fuel_type"),
+            total_rooms       =assessor.get("total_rooms"),
+            stories           =assessor.get("stories"),
+            owner             =assessor.get("owner"),
+            assessor_source   =assessor.get("source") if assessor else None,
         )
     elif isinstance(listing_raw, dict) and listing_raw.get("error"):
         listing_data = ListingData(error=listing_raw["error"])
@@ -880,6 +903,8 @@ async def analyze(
         nearby_risks=nearby_risks,
         hidden_costs=hidden_costs,
         listing_data=listing_data,
+        schools=raw_data.get("schools") or None,
+        broadband=raw_data.get("broadband") or None,
         risks=risks,
         narrative=final_state.get("narrative", ""),
         mode_advice=final_state.get("mode_advice", ""),

@@ -89,9 +89,24 @@ class ListingData(BaseModel):
     heating_cooling:   Optional[str]   = None
     description:       Optional[str]   = None
     listing_url:       Optional[str]   = None
+    external_links:    Optional[dict]  = None
     photos:            List[str]       = []
     source:            Optional[str]   = None
     error:             Optional[str]   = None
+    # Assessor-sourced fields (public records, shown when live listing unavailable)
+    assessed_total:    Optional[int]   = None
+    assessed_building: Optional[int]   = None
+    assessed_land:     Optional[int]   = None
+    assessment_year:   Optional[int]   = None
+    last_sale_price:   Optional[int]   = None
+    last_sale_date:    Optional[str]   = None
+    style:             Optional[str]   = None
+    heat_type:         Optional[str]   = None
+    fuel_type:         Optional[str]   = None
+    total_rooms:       Optional[int]   = None
+    stories:           Optional[int]   = None
+    owner:             Optional[str]   = None
+    assessor_source:   Optional[str]   = None
 
 
 class HiddenCost(BaseModel):
@@ -117,6 +132,8 @@ class AnalyzeResponse(BaseModel):
     nearby_risks:       List[NearbyRisk]         = []
     hidden_costs:       List[HiddenCost]         = []
     listing_data:       Optional["ListingData"]  = None
+    schools:            Optional[dict]           = None
+    broadband:          Optional[dict]           = None
     risks:              List[RiskItem]
     narrative:          str
     mode_advice:        str

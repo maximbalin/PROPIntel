@@ -95,6 +95,8 @@ function renderResults(data) {
   document.getElementById('adviceText').textContent = data.mode_advice;
 
   renderRisks(data.risks);
+  renderSchools(data.schools);
+  renderBroadband(data.broadband);
   document.getElementById('sourcesList').textContent =
     (data.data_sources || []).join(', ') || 'FEMA · EPA · OSM · Census · USGS';
   showResults();
@@ -163,10 +165,24 @@ function renderListingData(listing) {
 
   const fin = [];
   if (listing.property_type)           fin.push(`<span class="listing-fin-item"><strong>Type</strong> ${listing.property_type}</span>`);
+  if (listing.style)                   fin.push(`<span class="listing-fin-item"><strong>Style</strong> ${listing.style}</span>`);
   if (listing.hoa_fee_monthly != null) fin.push(`<span class="listing-fin-item"><strong>HOA</strong> $${listing.hoa_fee_monthly.toLocaleString()}/mo</span>`);
   if (listing.tax_annual != null)      fin.push(`<span class="listing-fin-item"><strong>Tax</strong> $${Math.round(listing.tax_annual).toLocaleString()}/yr</span>`);
   if (listing.days_on_market != null)  fin.push(`<span class="listing-fin-item"><strong>Days on market</strong> ${listing.days_on_market}</span>`);
   if (listing.heating_cooling)         fin.push(`<span class="listing-fin-item"><strong>HVAC</strong> ${listing.heating_cooling}</span>`);
+  if (listing.heat_type)               fin.push(`<span class="listing-fin-item"><strong>Heat</strong> ${listing.heat_type}</span>`);
+  if (listing.fuel_type)               fin.push(`<span class="listing-fin-item"><strong>Fuel</strong> ${listing.fuel_type}</span>`);
+  if (listing.stories)                 fin.push(`<span class="listing-fin-item"><strong>Stories</strong> ${listing.stories}</span>`);
+
+  // Assessor / public-records block
+  const asr = [];
+  if (listing.assessed_total)    asr.push(`<span class="listing-fin-item asr-item"><strong>Assessed</strong> $${listing.assessed_total.toLocaleString()}<span class="asr-yr">${listing.assessment_year ? ` (${listing.assessment_year})` : ''}</span></span>`);
+  if (listing.assessed_building) asr.push(`<span class="listing-fin-item asr-item"><strong>Building</strong> $${listing.assessed_building.toLocaleString()}</span>`);
+  if (listing.assessed_land)     asr.push(`<span class="listing-fin-item asr-item"><strong>Land</strong> $${listing.assessed_land.toLocaleString()}</span>`);
+  if (listing.last_sale_price)   asr.push(`<span class="listing-fin-item asr-item"><strong>Last sale</strong> $${listing.last_sale_price.toLocaleString()}${listing.last_sale_date ? ` (${listing.last_sale_date})` : ''}</span>`);
+  if (listing.owner)             asr.push(`<span class="listing-fin-item asr-item"><strong>Owner</strong> ${listing.owner}</span>`);
+  const asrSrc = listing.assessor_source ? `<span class="asr-source">${listing.assessor_source}</span>` : '';
+  const asrRow = asr.length ? `<div class="listing-fin-row asr-row">${asr.join('')}${asrSrc}</div>` : '';
 
   const specsRow = specs.length ? `<div class="listing-specs">${specs.join('')}</div>` : '';
   const finRow   = fin.length   ? `<div class="listing-fin-row">${fin.join('')}</div>`  : '';
@@ -184,6 +200,7 @@ function renderListingData(listing) {
         ${priceHtml}
         ${specsRow}
         ${finRow}
+        ${asrRow}
         ${descHtml}
         ${linkHtml}
       </div>
@@ -557,6 +574,77 @@ function renderRisks(risks) {
 
 function toggleRisk(header) { header.closest('.risk-card').classList.toggle('expanded'); }
 function formatCategory(cat) { return cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()); }
+
+// ── Schools ───────────────────────────────────────────────
+
+function renderSchools(schools) {
+  const sec   = document.getElementById('schoolsSection');
+  const grid  = document.getElementById('schoolsGrid');
+  const srcEl = document.getElementById('schoolsSectionSources');
+
+  if (!schools || !schools.nearest || Object.keys(schools.nearest).length === 0) {
+    sec.classList.add('hidden');
+    return;
+  }
+  sec.classList.remove('hidden');
+  if (srcEl) srcEl.textContent = schools.source || '';
+
+  const icons = { Elementary: '🏫', Middle: '🏛', High: '🎓' };
+  grid.innerHTML = Object.entries(schools.nearest).map(([level, s]) => {
+    const icon = icons[s.level] || '🏫';
+    return `
+      <div class="school-card">
+        <div class="school-icon">${icon}</div>
+        <div class="school-info">
+          <div class="school-name">${s.name}</div>
+          <div class="school-meta">
+            <span class="school-level">${s.level}</span>
+            <span class="school-type">${s.type}</span>
+          </div>
+          <div class="school-dist">${s.distance_miles} mi away · ${s.city || ''}</div>
+        </div>
+      </div>`;
+  }).join('');
+
+  if (schools.total_within_radius != null) {
+    grid.insertAdjacentHTML('beforeend',
+      `<div class="schools-count">${schools.total_within_radius} schools within ${schools.radius_miles} mi</div>`);
+  }
+}
+
+// ── Broadband ─────────────────────────────────────────────
+
+function renderBroadband(bb) {
+  const card = document.getElementById('broadbandCard');
+  const body = document.getElementById('broadbandBody');
+
+  if (!bb || bb.provider_count == null) { card.classList.add('hidden'); return; }
+  card.classList.remove('hidden');
+
+  const avail = bb.available
+    ? `<span class="bb-badge bb-good">Broadband Available</span>`
+    : `<span class="bb-badge bb-bad">No Broadband</span>`;
+  const gigabit = bb.has_gigabit
+    ? `<span class="bb-badge bb-good">Gigabit</span>` : '';
+
+  const stats = [];
+  stats.push(`<span class="bb-stat"><strong>${bb.provider_count}</strong> provider${bb.provider_count !== 1 ? 's' : ''}</span>`);
+  if (bb.max_download_mbps) stats.push(`<span class="bb-stat"><strong>${bb.max_download_mbps}</strong> Mbps down</span>`);
+  if (bb.max_upload_mbps)   stats.push(`<span class="bb-stat"><strong>${bb.max_upload_mbps}</strong> Mbps up</span>`);
+
+  const techs = (bb.technologies || []).length
+    ? `<div class="bb-techs">${bb.technologies.map(t => `<span class="bb-tech">${t}</span>`).join('')}</div>` : '';
+
+  const names = (bb.provider_names || []).length
+    ? `<div class="bb-names">${bb.provider_names.join(' · ')}</div>` : '';
+
+  body.innerHTML = `
+    <div class="bb-badges">${avail}${gigabit}</div>
+    <div class="bb-stats">${stats.join('')}</div>
+    ${techs}
+    ${names}
+    ${bb.source ? `<div class="bb-source">${bb.source}</div>` : ''}`;
+}
 
 // ── Helpers ───────────────────────────────────────────────
 

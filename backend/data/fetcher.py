@@ -10,6 +10,9 @@ from backend.data.osm import get_infrastructure, _compute_scores
 from backend.data.census import get_demographics
 from backend.data.usgs import get_elevation
 from backend.data.traffic import get_crash_data, enrich_traffic_data
+from backend.data.assessor import get_assessor_data
+from backend.data.schools import get_nearby_schools
+from backend.data.broadband import get_broadband
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +78,7 @@ class FreeDataFetcher:
             return float(results[0]["lat"]), float(results[0]["lon"])
 
     async def fetch_all(self, lat: float, lon: float, force_refresh: bool = False) -> dict:
-        cache_key = f"raw:v7:{lat:.4f}:{lon:.4f}"
+        cache_key = f"raw:v8:{lat:.4f}:{lon:.4f}"
         redis = await get_redis()
 
         if not force_refresh:
@@ -94,6 +97,9 @@ class FreeDataFetcher:
             get_demographics(lat, lon),
             get_elevation(lat, lon, bfe_feet=bfe_feet),
             get_crash_data(lat, lon),
+            get_assessor_data(lat, lon),
+            get_nearby_schools(lat, lon),
+            get_broadband(lat, lon),
             return_exceptions=True,
         )
 
@@ -155,12 +161,15 @@ class FreeDataFetcher:
         )
 
         data = {
-            "fema":    safe(fema_result),
-            "epa":     safe(remaining[0]),
-            "osm":     osm_result,
-            "census":  safe(remaining[2]),
-            "usgs":    safe(remaining[3]),
-            "traffic": traffic_data,
+            "fema":      safe(fema_result),
+            "epa":       safe(remaining[0]),
+            "osm":       osm_result,
+            "census":    safe(remaining[2]),
+            "usgs":      safe(remaining[3]),
+            "traffic":   traffic_data,
+            "assessor":  safe(remaining[5]),
+            "schools":   safe(remaining[6]),
+            "broadband": safe(remaining[7]),
         }
 
         await redis.setex(cache_key, 48 * 3600, json.dumps(data))

@@ -775,6 +775,73 @@ body {
   padding-top: 0.5rem; border-top: 1px solid var(--border-light);
 }
 
+/* ── Assessor row ────────────────────────────────────────── */
+.asr-row { border-top: 1px dashed var(--border-light); padding-top: 0.5rem; margin-top: 0.25rem; }
+.asr-item strong { color: var(--muted); font-weight: 500; }
+.asr-yr { color: var(--muted-light); font-size: 0.8em; }
+.asr-source {
+  font-size: 0.7rem; color: var(--muted-light); white-space: nowrap;
+  font-style: italic; margin-left: auto;
+}
+
+/* ── Schools ─────────────────────────────────────────────── */
+.schools-section { margin-bottom: 1.5rem; }
+.schools-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 0.75rem;
+}
+.school-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.875rem 1rem;
+  display: flex; align-items: flex-start; gap: 0.75rem;
+  box-shadow: var(--shadow-sm);
+}
+.school-icon { font-size: 1.5rem; line-height: 1; flex-shrink: 0; }
+.school-info { min-width: 0; }
+.school-name { font-weight: 600; font-size: 0.875rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.school-meta { display: flex; gap: 0.375rem; margin-top: 0.25rem; flex-wrap: wrap; }
+.school-level {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  background: var(--blue-bg, #eff6ff); color: var(--blue, #2563eb);
+  padding: 0.1rem 0.375rem; border-radius: 4px;
+}
+.school-type {
+  font-size: 0.7rem; color: var(--muted-light);
+  padding: 0.1rem 0.375rem; border: 1px solid var(--border-light); border-radius: 4px;
+}
+.school-dist { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; }
+.schools-count {
+  grid-column: 1 / -1; font-size: 0.75rem; color: var(--muted-light);
+  font-family: var(--mono); padding-top: 0.25rem;
+}
+.schools-section-sources { font-size: 0.7rem; color: var(--muted-light); font-style: italic; }
+
+/* ── Broadband ───────────────────────────────────────────── */
+.broadband-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.125rem 1.25rem;
+  box-shadow: var(--shadow-sm); margin-bottom: 1.5rem;
+}
+.broadband-body { display: flex; flex-direction: column; gap: 0.625rem; }
+.bb-badges { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.bb-badge {
+  font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 0.25rem 0.625rem; border-radius: 6px;
+}
+.bb-good { background: #dcfce7; color: #15803d; }
+.bb-bad  { background: var(--red-bg); color: var(--red); }
+.bb-stats { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+.bb-stat { font-size: 0.875rem; color: var(--text-sub); }
+.bb-stat strong { color: var(--text); }
+.bb-techs { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+.bb-tech {
+  font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 4px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+  font-family: var(--mono);
+}
+.bb-names { font-size: 0.8rem; color: var(--muted); }
+.bb-source { font-size: 0.7rem; color: var(--muted-light); font-style: italic; }
+
 /* ── Footer ──────────────────────────────────────────────── */
 .report-footer {
   padding: 1rem 0; border-top: 1px solid var(--border);
