@@ -474,22 +474,40 @@ async def fetch_zillow_playwright(address: str) -> dict | None:
         logger.debug("playwright not installed — skipping; run: pip install playwright && playwright install chromium")
         return None
 
+    # playwright-stealth v1: stealth_async  v2: Stealth().apply_stealth_async
     stealth_fn = None
     try:
-        from playwright_stealth import stealth_async as stealth_fn
-    except ImportError:
-        logger.debug("playwright-stealth not installed — running without stealth patches")
+        from playwright_stealth import stealth_async as stealth_fn  # v1
+    except (ImportError, AttributeError):
+        try:
+            from playwright_stealth import Stealth as _Stealth
+            stealth_fn = _Stealth().apply_stealth_async  # v2
+        except (ImportError, AttributeError):
+            logger.debug("playwright-stealth not available — running without stealth patches")
+
+    # Find Chromium: prefer playwright's bundled version, fall back to system
+    import shutil
+    _system_chromium = (
+        shutil.which("chromium-browser")
+        or shutil.which("chromium")
+        or shutil.which("google-chrome")
+        or shutil.which("google-chrome-stable")
+    )
 
     try:
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=[
+            launch_kwargs: dict = {
+                "headless": True,
+                "args": [
                     "--no-sandbox",
                     "--disable-blink-features=AutomationControlled",
                     "--disable-dev-shm-usage",
                 ],
-            )
+            }
+            if _system_chromium:
+                launch_kwargs["executable_path"] = _system_chromium
+                logger.debug(f"Playwright: using system Chromium at {_system_chromium}")
+            browser = await pw.chromium.launch(**launch_kwargs)
             try:
                 context = await browser.new_context(
                     user_agent=(
